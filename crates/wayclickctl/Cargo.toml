@@ -1,0 +1,9 @@
+[package]
+name = "wayclickctl"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wayclick-core = { workspace = true }
+clap = { workspace = true }
+serde_json = { workspace = true }

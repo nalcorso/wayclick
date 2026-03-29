@@ -1,0 +1,12 @@
+[Unit]
+Description=Wayclick daemon (user session)
+After=default.target
+
+[Service]
+ExecStart=/usr/bin/wayclickd --enable
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=default.target

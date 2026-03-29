@@ -1,0 +1,6 @@
+# Grant the 'wayclick' group write access to uinput
+KERNEL=="uinput", SUBSYSTEM=="misc", MODE="0660", GROUP="wayclick", TAG+="uaccess"
+
+# Grant members of 'input' group read access to all input devices
+# (This rule is usually provided by systemd; included here for reference)
+KERNEL=="event*", SUBSYSTEM=="input", MODE="0660", GROUP="input", TAG+="uaccess"

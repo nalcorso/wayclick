@@ -1,0 +1,9 @@
+[package]
+name = "wayclick-evdev-dump"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+wayclick-core = { workspace = true }
+clap = { workspace = true }
+nix = { workspace = true }
