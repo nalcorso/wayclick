@@ -1025,6 +1025,7 @@ dependencies = [
 name = "wayclick-core"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "mlua",
  "nix",
  "rand",
@@ -1039,6 +1040,7 @@ name = "wayclick-evdev-dump"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "libc",
  "nix",
  "wayclick-core",
 ]

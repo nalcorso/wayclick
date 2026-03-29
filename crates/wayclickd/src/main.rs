@@ -8,10 +8,11 @@ use wayclick_core::config::{effective_socket_path, Config};
 use wayclick_core::config_watcher::ConfigWatcher;
 use wayclick_core::engine::Engine;
 use wayclick_core::evdev_monitor::EvdevMonitor;
-use wayclick_core::input_backend::LoggingBackend;
+use wayclick_core::input_backend::{InputBackend, LoggingBackend};
 use wayclick_core::ipc::IpcServer;
 use wayclick_core::logger::{LogLevel, Logger};
 use wayclick_core::lua_api::load_config;
+use wayclick_core::uinput_backend::UinputBackend;
 
 #[derive(Parser)]
 #[command(name = "wayclickd", about = "Wayclick programmable mouse automation daemon")]
@@ -116,9 +117,28 @@ fn main() {
 
     let socket_path = effective_socket_path(&config);
 
-    // Create backend (LoggingBackend for now; UinputBackend is Phase 2)
+    // Create backend: UinputBackend for real mode, LoggingBackend for dry-run
     let backend: Arc<dyn wayclick_core::input_backend::InputBackend> =
-        Arc::new(LoggingBackend::new(logger.clone()));
+        if config.options.dry_run {
+            logger.info("Starting in dry-run mode (LoggingBackend)");
+            Arc::new(LoggingBackend::new(logger.clone()))
+        } else {
+            let mut uinput = UinputBackend::new(logger.clone());
+            match uinput.init() {
+                Ok(()) => {
+                    logger.info("UinputBackend initialized successfully");
+                    Arc::new(uinput)
+                }
+                Err(e) => {
+                    logger.warn(format!(
+                        "Failed to init UinputBackend: {}. Falling back to dry-run mode.",
+                        e
+                    ));
+                    config.options.dry_run = true;
+                    Arc::new(LoggingBackend::new(logger.clone()))
+                }
+            }
+        };
 
     // Create engine
     let engine = Arc::new(Mutex::new(Engine::new(

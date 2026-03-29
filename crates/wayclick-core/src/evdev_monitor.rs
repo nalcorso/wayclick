@@ -1,17 +1,24 @@
-// EvdevMonitor — Phase 3 implementation
-// Coordinates device monitoring threads and hotplug events.
+// EvdevMonitor — coordinates device monitoring threads, hotplug, and trigger dispatch.
 
 use crate::config::DeviceBinding;
 use crate::engine::Engine;
-use crate::evdev_source::DeviceInfo;
+use crate::evdev_source::{self, DeviceInfo, EvdevSource, InputSource, EV_KEY};
 use crate::logger::Logger;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
-#[allow(dead_code)]
 pub struct EvdevMonitor {
     engine: Arc<Mutex<Engine>>,
     logger: Arc<Logger>,
     config_bindings: Vec<DeviceBinding>,
+    running: Arc<AtomicBool>,
+    device_threads: Vec<JoinHandle<()>>,
+    scan_thread: Option<JoinHandle<()>>,
+    tracked_devices: Arc<Mutex<HashMap<PathBuf, ()>>>,
 }
 
 impl EvdevMonitor {
@@ -20,6 +27,10 @@ impl EvdevMonitor {
             engine,
             logger,
             config_bindings: Vec::new(),
+            running: Arc::new(AtomicBool::new(false)),
+            device_threads: Vec::new(),
+            scan_thread: None,
+            tracked_devices: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -32,12 +43,184 @@ impl EvdevMonitor {
     }
 
     pub fn start(&mut self) {
+        if self.config_bindings.is_empty() {
+            self.logger
+                .info("EvdevMonitor: no device bindings, skipping device monitoring");
+            return;
+        }
+
+        self.running.store(true, Ordering::SeqCst);
+
+        // Initial scan
+        self.scan_devices();
+
+        // Launch periodic scan thread for hotplug detection
+        let running = self.running.clone();
+        let engine = self.engine.clone();
+        let logger = self.logger.clone();
+        let bindings = self.config_bindings.clone();
+        let tracked = self.tracked_devices.clone();
+
+        self.scan_thread = Some(thread::spawn(move || {
+            while running.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_secs(2));
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
+                // Scan for new devices
+                let devices = evdev_source::enumerate_devices();
+                for dev in &devices {
+                    let already_tracked = tracked.lock().unwrap().contains_key(&dev.path);
+                    if already_tracked {
+                        continue;
+                    }
+                    // Check if this device matches any binding
+                    for binding in &bindings {
+                        if match_device(dev, binding) {
+                            logger.info(format!(
+                                "Hotplug: new device '{}' at {:?} matches binding",
+                                dev.name, dev.path
+                            ));
+                            tracked.lock().unwrap().insert(dev.path.clone(), ());
+                            spawn_device_thread(
+                                dev.path.clone(),
+                                binding.exclusive,
+                                binding.clone(),
+                                engine.clone(),
+                                logger.clone(),
+                                running.clone(),
+                                tracked.clone(),
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+        }));
+
+        self.logger.info("EvdevMonitor: device monitoring started");
+    }
+
+    fn scan_devices(&mut self) {
+        let devices = evdev_source::enumerate_devices();
         self.logger
-            .info("EvdevMonitor: device monitoring not yet implemented (Phase 3)");
+            .info(format!("EvdevMonitor: found {} input devices", devices.len()));
+
+        for dev in &devices {
+            for binding in &self.config_bindings {
+                if match_device(dev, binding) {
+                    self.logger.info(format!(
+                        "EvdevMonitor: matched '{}' at {:?}",
+                        dev.name, dev.path
+                    ));
+                    self.tracked_devices
+                        .lock()
+                        .unwrap()
+                        .insert(dev.path.clone(), ());
+
+                    let handle = spawn_device_thread(
+                        dev.path.clone(),
+                        binding.exclusive,
+                        binding.clone(),
+                        self.engine.clone(),
+                        self.logger.clone(),
+                        self.running.clone(),
+                        self.tracked_devices.clone(),
+                    );
+                    self.device_threads.push(handle);
+                    break; // Only match first binding per device
+                }
+            }
+        }
     }
 
     pub fn stop(&mut self) {
+        self.running.store(false, Ordering::SeqCst);
+
+        if let Some(thread) = self.scan_thread.take() {
+            let _ = thread.join();
+        }
+
+        // Device threads will exit when running becomes false
+        for thread in self.device_threads.drain(..) {
+            let _ = thread.join();
+        }
+
+        self.tracked_devices.lock().unwrap().clear();
         self.logger.info("EvdevMonitor: stopped");
+    }
+}
+
+fn spawn_device_thread(
+    path: PathBuf,
+    exclusive: bool,
+    binding: DeviceBinding,
+    engine: Arc<Mutex<Engine>>,
+    logger: Arc<Logger>,
+    running: Arc<AtomicBool>,
+    tracked: Arc<Mutex<HashMap<PathBuf, ()>>>,
+) -> JoinHandle<()> {
+    thread::spawn(move || {
+        let mut source = match EvdevSource::open(&path, exclusive) {
+            Ok(s) => s,
+            Err(e) => {
+                logger.warn(format!("Failed to open {:?}: {}", path, e));
+                tracked.lock().unwrap().remove(&path);
+                return;
+            }
+        };
+
+        logger.debug(format!(
+            "Monitoring device '{}' at {:?}",
+            source.device_info().name,
+            path
+        ));
+
+        while running.load(Ordering::SeqCst) {
+            match source.poll_events(Duration::from_millis(100)) {
+                Ok(events) => {
+                    for event in events {
+                        if event.event_type == EV_KEY && event.value == 1 {
+                            // Key press — check if it matches a button binding
+                            dispatch_button_event(event.code, &binding, &engine, &logger);
+                        }
+                    }
+                }
+                Err(crate::evdev_source::SourceError::Disconnected) => {
+                    logger.warn(format!("Device {:?} disconnected", path));
+                    tracked.lock().unwrap().remove(&path);
+                    break;
+                }
+                Err(e) => {
+                    logger.warn(format!("Read error on {:?}: {}", path, e));
+                    tracked.lock().unwrap().remove(&path);
+                    break;
+                }
+            }
+        }
+
+        source.close();
+    })
+}
+
+fn dispatch_button_event(
+    code: u16,
+    binding: &DeviceBinding,
+    engine: &Arc<Mutex<Engine>>,
+    logger: &Arc<Logger>,
+) {
+    use crate::config::button_code_from_name;
+    for bb in &binding.button_bindings {
+        if let Some(btn_code) = button_code_from_name(&bb.code) {
+            if btn_code == code {
+                logger.debug(format!(
+                    "Button {} pressed, firing trigger '{}'",
+                    bb.code, bb.trigger_id
+                ));
+                let mut eng = engine.lock().unwrap();
+                let _ = eng.trigger_event(&bb.trigger_id, true);
+            }
+        }
     }
 }
 

@@ -1,0 +1,27 @@
+[package]
+name = "wayclick-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+wayclick-core = { path = "../crates/wayclick-core" }
+
+[[bin]]
+name = "fuzz_config_loader"
+path = "fuzz_targets/fuzz_config_loader.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_ipc_frame"
+path = "fuzz_targets/fuzz_ipc_frame.rs"
+doc = false
+
+[[bin]]
+name = "fuzz_device_match"
+path = "fuzz_targets/fuzz_device_match.rs"
+doc = false

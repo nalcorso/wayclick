@@ -7,3 +7,4 @@ pub mod input_backend;
 pub mod ipc;
 pub mod logger;
 pub mod lua_api;
+pub mod uinput_backend;
