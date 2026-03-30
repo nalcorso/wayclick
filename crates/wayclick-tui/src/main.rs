@@ -153,11 +153,12 @@ impl App {
             }
         }
 
-        // Fetch trigger list
+        // Fetch trigger list (result is a direct array)
         match ipc::ipc_request(&self.socket_path, "list_triggers", None) {
             Ok(resp) => {
                 if let Some(result) = resp.get("result") {
-                    if let Some(triggers) = result.get("triggers").and_then(|v| v.as_array()) {
+                    let triggers_arr = result.as_array();
+                    if let Some(triggers) = triggers_arr {
                         self.triggers = triggers
                             .iter()
                             .filter_map(|t| {
@@ -168,7 +169,7 @@ impl App {
                                     .unwrap_or("toggle")
                                     .to_string();
                                 let action = t
-                                    .get("action")
+                                    .get("action_type")
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("unknown")
                                     .to_string();
@@ -192,15 +193,19 @@ impl App {
             }
         }
 
-        // Fetch logs
+        // Fetch logs (result is array of {level, message, timestamp} objects)
         let params = serde_json::json!({"n": 50});
         match ipc::ipc_request(&self.socket_path, "logs_tail", Some(params)) {
             Ok(resp) => {
                 if let Some(result) = resp.get("result") {
-                    if let Some(logs) = result.get("logs").and_then(|v| v.as_array()) {
+                    if let Some(logs) = result.as_array() {
                         self.logs = logs
                             .iter()
-                            .filter_map(|v| v.as_str().map(String::from))
+                            .filter_map(|entry| {
+                                let level = entry.get("level")?.as_str()?;
+                                let message = entry.get("message")?.as_str()?;
+                                Some(format!("[{}] {}", level, message))
+                            })
                             .collect();
                     }
                 }
