@@ -2,7 +2,7 @@
 -- MB5 (forward/extra button) toggles a left-click auto-clicker on and off.
 
 wayclick.set_options({
-  dry_run = true, -- set to false once permissions are configured
+  dry_run = false,
   log_capacity = 512,
 })
 
