@@ -163,6 +163,9 @@ pub enum ActionConfig {
         mode: CompositeMode,
         actions: Vec<ActionConfig>,
     },
+    Delay {
+        duration_ms: u32,
+    },
     NoOp,
 }
 
@@ -177,6 +180,7 @@ impl ActionConfig {
                 CompositeMode::Parallel => "parallel",
                 CompositeMode::Sequence => "sequence",
             },
+            ActionConfig::Delay { .. } => "delay",
             ActionConfig::NoOp => "noop",
         }
     }
@@ -401,6 +405,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
                     validate_action_intervals(a, min_interval, errors);
                 }
             }
+            ActionConfig::Delay { .. } => {}
             ActionConfig::NoOp => {}
         }
     }
@@ -568,6 +573,10 @@ mod tests {
     #[test]
     fn test_action_type_name() {
         assert_eq!(ActionConfig::NoOp.type_name(), "noop");
+        assert_eq!(
+            ActionConfig::Delay { duration_ms: 100 }.type_name(),
+            "delay"
+        );
         let ac = ActionConfig::AutoClick {
             button: MouseButton::Left,
             interval_ms: 50,

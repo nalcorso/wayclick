@@ -433,6 +433,9 @@ fn execute_action_loop(
                 execute_action_sync(sub_action, backend, logger)?;
             }
         }
+        ActionConfig::Delay { duration_ms } => {
+            interruptible_sleep(*duration_ms, stop_rx);
+        }
         ActionConfig::NoOp => {
             logger.debug("NoOp action, waiting for stop signal");
             let _ = stop_rx.recv();
@@ -526,6 +529,9 @@ fn execute_action_sync(
             for h in handles {
                 h.join().unwrap()?;
             }
+        }
+        ActionConfig::Delay { duration_ms } => {
+            thread::sleep(Duration::from_millis(*duration_ms as u64));
         }
         ActionConfig::NoOp => {
             logger.debug("NoOp (sync)");

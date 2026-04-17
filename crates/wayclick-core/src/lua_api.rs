@@ -305,6 +305,22 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
         .set("noop", noop)
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
 
+    // wayclick.delay(table) -> action table
+    let delay = lua
+        .create_function(|lua, table: LuaTable| {
+            let duration_ms: u32 = table
+                .get::<u32>("ms")
+                .map_err(|_| LuaError::RuntimeError("delay requires 'ms' field".into()))?;
+            let action = lua.create_table()?;
+            action.set("_type", "delay")?;
+            action.set("_duration_ms", duration_ms)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("delay", delay)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
     // wayclick.register_trigger(table)
     let register_trigger = lua
         .create_function(|lua, table: LuaTable| {
@@ -527,6 +543,10 @@ fn parse_action_table(table: &LuaTable) -> Result<ActionConfig, LuaError> {
             })
         }
         "noop" => Ok(ActionConfig::NoOp),
+        "delay" => {
+            let duration_ms: u32 = table.get("_duration_ms")?;
+            Ok(ActionConfig::Delay { duration_ms })
+        }
         other => Err(LuaError::RuntimeError(format!(
             "Unknown action type: {}",
             other
@@ -1023,6 +1043,75 @@ mod tests {
                 assert_eq!(*dy, -5);
             }
             _ => panic!("Expected MouseMove"),
+        }
+    }
+
+    #[test]
+    fn test_delay_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.delay({ ms = 250 }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::Delay { duration_ms } => {
+                assert_eq!(*duration_ms, 250);
+            }
+            _ => panic!("Expected Delay"),
+        }
+    }
+
+    #[test]
+    fn test_delay_requires_ms_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.delay({}),
+            })
+        "#,
+        );
+        assert!(load_config(&path, &test_logger()).is_err());
+    }
+
+    #[test]
+    fn test_delay_in_sequence() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.sequence({ actions = {
+                    wayclick.auto_click({ button = "left" }),
+                    wayclick.delay({ ms = 500 }),
+                    wayclick.auto_click({ button = "left" }),
+                }}),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::Composite { mode: CompositeMode::Sequence, actions } => {
+                assert_eq!(actions.len(), 3);
+                assert!(matches!(actions[0], ActionConfig::AutoClick { .. }));
+                assert!(matches!(actions[1], ActionConfig::Delay { duration_ms: 500 }));
+                assert!(matches!(actions[2], ActionConfig::AutoClick { .. }));
+            }
+            _ => panic!("Expected Sequence"),
         }
     }
 }

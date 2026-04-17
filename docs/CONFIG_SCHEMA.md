@@ -111,6 +111,24 @@ wayclick.trigger {
 }
 ```
 
+### delay
+
+Pauses execution for a fixed duration. Useful between steps in a sequence.
+
+```lua
+wayclick.trigger {
+    id = "timed_macro",
+    mode = "oneshot",
+    action = wayclick.sequence {
+        actions = {
+            wayclick.auto_click { button = "left" },
+            wayclick.delay { ms = 500 },
+            wayclick.auto_click { button = "left" },
+        },
+    },
+}
+```
+
 ## Trigger Modes
 
 | Mode      | Behavior                                           |
