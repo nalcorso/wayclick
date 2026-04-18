@@ -198,6 +198,20 @@ impl InputBackend for UinputBackend {
         Ok(())
     }
 
+    fn mouse_press(&self, button: MouseButton) -> Result<(), BackendError> {
+        let code = button.event_code();
+        self.write_event(EV_KEY, code, 1)?;
+        self.syn()?;
+        Ok(())
+    }
+
+    fn mouse_release(&self, button: MouseButton) -> Result<(), BackendError> {
+        let code = button.event_code();
+        self.write_event(EV_KEY, code, 0)?;
+        self.syn()?;
+        Ok(())
+    }
+
     fn key_press(&self, key_code: u32) -> Result<(), BackendError> {
         self.write_event(EV_KEY, key_code as u16, 1)?;
         self.syn()?;

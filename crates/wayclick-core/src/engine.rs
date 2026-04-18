@@ -309,12 +309,13 @@ fn execute_action_loop(
             interval_ms,
             duration_ms,
             jitter_ms,
+            hold_ms,
         } => {
             loop {
                 if stop_rx.try_recv().is_ok() {
                     break;
                 }
-                backend.click(*button)?;
+                do_click(backend, *button, *hold_ms)?;
                 let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
                 if !interruptible_sleep(sleep_ms, stop_rx) {
                     break;
@@ -458,14 +459,15 @@ fn execute_action_sync(
             interval_ms,
             duration_ms,
             jitter_ms,
+            hold_ms,
         } => {
             let dur = duration_ms.unwrap_or(0);
             if dur == 0 {
                 // Single click
-                backend.click(*button)?;
+                do_click(backend, *button, *hold_ms)?;
             } else {
                 loop {
-                    backend.click(*button)?;
+                    do_click(backend, *button, *hold_ms)?;
                     if action_start.elapsed().as_millis() >= dur as u128 {
                         break;
                     }
@@ -540,6 +542,23 @@ fn execute_action_sync(
     Ok(())
 }
 
+/// Perform a single click with an optional hold duration.
+/// When hold_ms is 0, uses the atomic click() method. When > 0, holds the
+/// button pressed for the specified duration before releasing.
+fn do_click(
+    backend: &Arc<dyn InputBackend>,
+    button: MouseButton,
+    hold_ms: u32,
+) -> Result<(), BackendError> {
+    if hold_ms == 0 {
+        backend.click(button)
+    } else {
+        backend.mouse_press(button)?;
+        thread::sleep(Duration::from_millis(hold_ms as u64));
+        backend.mouse_release(button)
+    }
+}
+
 fn jittered_interval(interval_ms: u32, jitter_ms: u32) -> u32 {
     if jitter_ms == 0 {
         return interval_ms;
@@ -600,6 +619,7 @@ mod tests {
                 interval_ms,
                 duration_ms: None,
                 jitter_ms: 0,
+                hold_ms: 0,
             },
             cooldown_ms: None,
         }
@@ -675,6 +695,7 @@ mod tests {
                 interval_ms: 10,
                 duration_ms: Some(50),
                 jitter_ms: 0,
+                hold_ms: 0,
             },
             cooldown_ms: None,
         };
@@ -756,6 +777,7 @@ mod tests {
                 interval_ms: 5,
                 duration_ms: Some(50),
                 jitter_ms: 0,
+                hold_ms: 0,
             },
             cooldown_ms: None,
         };

@@ -16,6 +16,8 @@ pub enum BackendError {
 pub trait InputBackend: Send + Sync {
     fn init(&mut self) -> Result<(), BackendError>;
     fn click(&self, button: MouseButton) -> Result<(), BackendError>;
+    fn mouse_press(&self, button: MouseButton) -> Result<(), BackendError>;
+    fn mouse_release(&self, button: MouseButton) -> Result<(), BackendError>;
     fn key_press(&self, key_code: u32) -> Result<(), BackendError>;
     fn key_release(&self, key_code: u32) -> Result<(), BackendError>;
     fn scroll(&self, direction: ScrollDirection, amount: i32) -> Result<(), BackendError>;
@@ -43,6 +45,18 @@ impl InputBackend for LoggingBackend {
     fn click(&self, button: MouseButton) -> Result<(), BackendError> {
         self.logger
             .debug(format!("DRY RUN click {:?}", button));
+        Ok(())
+    }
+
+    fn mouse_press(&self, button: MouseButton) -> Result<(), BackendError> {
+        self.logger
+            .debug(format!("DRY RUN mouse_press {:?}", button));
+        Ok(())
+    }
+
+    fn mouse_release(&self, button: MouseButton) -> Result<(), BackendError> {
+        self.logger
+            .debug(format!("DRY RUN mouse_release {:?}", button));
         Ok(())
     }
 
@@ -79,6 +93,8 @@ impl InputBackend for LoggingBackend {
 #[derive(Debug, Clone, PartialEq)]
 pub enum BackendCall {
     Click(MouseButton),
+    MousePress(MouseButton),
+    MouseRelease(MouseButton),
     KeyPress(u32),
     KeyRelease(u32),
     Scroll(ScrollDirection, i32),
@@ -112,6 +128,22 @@ impl InputBackend for MockBackend {
 
     fn click(&self, button: MouseButton) -> Result<(), BackendError> {
         self.calls.lock().unwrap().push(BackendCall::Click(button));
+        Ok(())
+    }
+
+    fn mouse_press(&self, button: MouseButton) -> Result<(), BackendError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(BackendCall::MousePress(button));
+        Ok(())
+    }
+
+    fn mouse_release(&self, button: MouseButton) -> Result<(), BackendError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(BackendCall::MouseRelease(button));
         Ok(())
     }
 

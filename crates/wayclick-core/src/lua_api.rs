@@ -167,6 +167,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             let interval_ms: u32 = table.get("interval_ms").unwrap_or(50);
             let duration_ms: Option<u32> = table.get("duration_ms").ok();
             let jitter_ms: u32 = table.get("jitter_ms").unwrap_or(0);
+            let hold_ms: u32 = table.get("hold_ms").unwrap_or(0);
 
             let action = lua.create_table()?;
             action.set("_type", "auto_click")?;
@@ -176,6 +177,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 action.set("_duration_ms", d)?;
             }
             action.set("_jitter_ms", jitter_ms)?;
+            action.set("_hold_ms", hold_ms)?;
             Ok(action)
         })
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
@@ -475,11 +477,13 @@ fn parse_action_table(table: &LuaTable) -> Result<ActionConfig, LuaError> {
             let interval_ms: u32 = table.get("_interval_ms")?;
             let duration_ms: Option<u32> = table.get("_duration_ms").ok();
             let jitter_ms: u32 = table.get("_jitter_ms")?;
+            let hold_ms: u32 = table.get("_hold_ms").unwrap_or(0);
             Ok(ActionConfig::AutoClick {
                 button,
                 interval_ms,
                 duration_ms,
                 jitter_ms,
+                hold_ms,
             })
         }
         "key_press" => {
@@ -623,6 +627,7 @@ mod tests {
                 interval_ms,
                 duration_ms,
                 jitter_ms,
+                ..
             } => {
                 assert_eq!(*button, MouseButton::Left);
                 assert_eq!(*interval_ms, 50);
@@ -1112,6 +1117,54 @@ mod tests {
                 assert!(matches!(actions[2], ActionConfig::AutoClick { .. }));
             }
             _ => panic!("Expected Sequence"),
+        }
+    }
+
+    #[test]
+    fn test_auto_click_hold_ms() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.auto_click({
+                    button = "left",
+                    interval_ms = 20,
+                    hold_ms = 5,
+                }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::AutoClick { hold_ms, .. } => {
+                assert_eq!(*hold_ms, 5);
+            }
+            _ => panic!("Expected AutoClick"),
+        }
+    }
+
+    #[test]
+    fn test_auto_click_hold_ms_defaults_to_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.auto_click({ button = "left" }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::AutoClick { hold_ms, .. } => {
+                assert_eq!(*hold_ms, 0);
+            }
+            _ => panic!("Expected AutoClick"),
         }
     }
 }

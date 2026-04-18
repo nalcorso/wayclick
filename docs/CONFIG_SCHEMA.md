@@ -27,6 +27,7 @@ wayclick.trigger {
         button = "left",      -- left | right | middle | button4 | button5
         interval_ms = 10,     -- Milliseconds between clicks
         jitter_ms = 5,        -- Random ± jitter added to interval (anti-detection)
+        hold_ms = 0,          -- Milliseconds to hold button down per click (0 = instant)
     },
     cooldown_ms = 100,        -- Override global cooldown for this trigger
     duration_ms = 5000,       -- Auto-stop after N ms (0 = unlimited)

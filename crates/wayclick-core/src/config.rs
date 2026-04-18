@@ -137,6 +137,7 @@ pub enum ActionConfig {
         interval_ms: u32,
         duration_ms: Option<u32>,
         jitter_ms: u32,
+        hold_ms: u32,
     },
     KeyPress {
         key_name: String,
@@ -521,6 +522,7 @@ mod tests {
                     interval_ms: 50,
                     duration_ms: None,
                     jitter_ms: 0,
+                    hold_ms: 0,
                 },
                 cooldown_ms: None,
             }],
@@ -582,6 +584,7 @@ mod tests {
             interval_ms: 50,
             duration_ms: None,
             jitter_ms: 0,
+            hold_ms: 0,
         };
         assert_eq!(ac.type_name(), "auto_click");
     }

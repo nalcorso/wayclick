@@ -81,8 +81,9 @@ wayclick.register_trigger({
   cooldown_ms = 300,
   action = wayclick.auto_click({
     button = "left",
-    interval_ms = 10,
-    jitter_ms = 5,
+    interval_ms = 8,
+    jitter_ms = 4,
+    hold_ms = 2,
   }),
 })
 
