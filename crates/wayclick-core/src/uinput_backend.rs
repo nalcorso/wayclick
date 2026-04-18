@@ -15,11 +15,14 @@ use std::sync::{Arc, Mutex};
 const EV_SYN: u16 = 0x00;
 const EV_KEY: u16 = 0x01;
 const EV_REL: u16 = 0x02;
+const EV_ABS: u16 = 0x03;
 const SYN_REPORT: u16 = 0x00;
 const REL_X: u16 = 0x00;
 const REL_Y: u16 = 0x01;
 const REL_WHEEL: u16 = 0x08;
 const REL_HWHEEL: u16 = 0x06;
+const ABS_X: u16 = 0x00;
+const ABS_Y: u16 = 0x01;
 
 const BTN_LEFT: u16 = 0x110;
 const BTN_RIGHT: u16 = 0x111;
@@ -74,12 +77,37 @@ struct InputId {
 nix::ioctl_write_int!(ui_set_evbit, UINPUT_IOCTL_BASE, 100);
 nix::ioctl_write_int!(ui_set_keybit, UINPUT_IOCTL_BASE, 101);
 nix::ioctl_write_int!(ui_set_relbit, UINPUT_IOCTL_BASE, 102);
+nix::ioctl_write_int!(ui_set_absbit, UINPUT_IOCTL_BASE, 103);
 nix::ioctl_none!(ui_dev_create, UINPUT_IOCTL_BASE, 1);
 nix::ioctl_none!(ui_dev_destroy, UINPUT_IOCTL_BASE, 2);
 
 // UI_DEV_SETUP = _IOW('U', 3, sizeof(uinput_setup))
 // sizeof(uinput_setup) = 92 on 64-bit
 nix::ioctl_write_ptr!(ui_dev_setup, UINPUT_IOCTL_BASE, 3, UinputSetup);
+
+// UI_ABS_SETUP = _IOW('U', 4, sizeof(uinput_abs_setup))
+nix::ioctl_write_ptr!(ui_abs_setup, UINPUT_IOCTL_BASE, 4, UinputAbsSetup);
+
+/// uinput_abs_setup struct for configuring absolute axes
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+struct UinputAbsSetup {
+    code: u16,
+    _pad: u16,
+    absinfo: InputAbsinfo,
+}
+
+/// input_absinfo struct
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+struct InputAbsinfo {
+    value: i32,
+    minimum: i32,
+    maximum: i32,
+    fuzz: i32,
+    flat: i32,
+    resolution: i32,
+}
 
 pub struct UinputBackend {
     logger: Arc<Logger>,
@@ -139,6 +167,8 @@ impl InputBackend for UinputBackend {
                 .map_err(|e| BackendError::Other(format!("UI_SET_EVBIT EV_KEY: {}", e)))?;
             ui_set_evbit(fd, EV_REL as _)
                 .map_err(|e| BackendError::Other(format!("UI_SET_EVBIT EV_REL: {}", e)))?;
+            ui_set_evbit(fd, EV_ABS as _)
+                .map_err(|e| BackendError::Other(format!("UI_SET_EVBIT EV_ABS: {}", e)))?;
             ui_set_evbit(fd, EV_SYN as _)
                 .map_err(|e| BackendError::Other(format!("UI_SET_EVBIT EV_SYN: {}", e)))?;
 
@@ -148,8 +178,12 @@ impl InputBackend for UinputBackend {
                     .map_err(|e| BackendError::Other(format!("UI_SET_KEYBIT {}: {}", btn, e)))?;
             }
 
-            // Enable common keyboard keys (KEY_ESC=1 through KEY_MAX)
+            // Enable keyboard keys including media keys (1..=248 + media key range)
             for key in 1..=248u16 {
+                let _ = ui_set_keybit(fd, key as _);
+            }
+            // Brightness keys (224-225)
+            for key in 224..=225u16 {
                 let _ = ui_set_keybit(fd, key as _);
             }
 
@@ -157,6 +191,12 @@ impl InputBackend for UinputBackend {
             for rel in [REL_X, REL_Y, REL_WHEEL, REL_HWHEEL] {
                 ui_set_relbit(fd, rel as _)
                     .map_err(|e| BackendError::Other(format!("UI_SET_RELBIT {}: {}", rel, e)))?;
+            }
+
+            // Enable absolute axes
+            for abs in [ABS_X, ABS_Y] {
+                ui_set_absbit(fd, abs as _)
+                    .map_err(|e| BackendError::Other(format!("UI_SET_ABSBIT {}: {}", abs, e)))?;
             }
 
             // Set up device info
@@ -175,6 +215,38 @@ impl InputBackend for UinputBackend {
 
             ui_dev_setup(fd, &setup)
                 .map_err(|e| BackendError::Other(format!("UI_DEV_SETUP: {}", e)))?;
+
+            // Configure absolute axes (0..32767 = standard HID tablet range)
+            let abs_x = UinputAbsSetup {
+                code: ABS_X,
+                _pad: 0,
+                absinfo: InputAbsinfo {
+                    value: 0,
+                    minimum: 0,
+                    maximum: 32767,
+                    fuzz: 0,
+                    flat: 0,
+                    resolution: 0,
+                },
+            };
+            ui_abs_setup(fd, &abs_x)
+                .map_err(|e| BackendError::Other(format!("UI_ABS_SETUP ABS_X: {}", e)))?;
+
+            let abs_y = UinputAbsSetup {
+                code: ABS_Y,
+                _pad: 0,
+                absinfo: InputAbsinfo {
+                    value: 0,
+                    minimum: 0,
+                    maximum: 32767,
+                    fuzz: 0,
+                    flat: 0,
+                    resolution: 0,
+                },
+            };
+            ui_abs_setup(fd, &abs_y)
+                .map_err(|e| BackendError::Other(format!("UI_ABS_SETUP ABS_Y: {}", e)))?;
+
             ui_dev_create(fd)
                 .map_err(|e| BackendError::Other(format!("UI_DEV_CREATE: {}", e)))?;
         }
@@ -243,6 +315,13 @@ impl InputBackend for UinputBackend {
         if dy != 0 {
             self.write_event(EV_REL, REL_Y, dy)?;
         }
+        self.syn()?;
+        Ok(())
+    }
+
+    fn move_absolute(&self, x: i32, y: i32) -> Result<(), BackendError> {
+        self.write_event(EV_ABS, ABS_X, x)?;
+        self.write_event(EV_ABS, ABS_Y, y)?;
         self.syn()?;
         Ok(())
     }

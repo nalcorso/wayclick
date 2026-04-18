@@ -50,6 +50,22 @@ enum Command {
     },
     /// Check if daemon is running
     Ping,
+    /// Manage layers
+    Layer {
+        #[command(subcommand)]
+        action: LayerAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum LayerAction {
+    /// Get the current active layer
+    Get,
+    /// Set the active layer
+    Set {
+        /// Layer name to switch to
+        name: String,
+    },
 }
 
 fn main() {
@@ -82,6 +98,16 @@ fn main() {
                 Some(serde_json::json!({ "n": tail })),
             )
         }
+        Command::Layer { action } => match action {
+            LayerAction::Get => ipc_request(&socket_path, "get_layer", None),
+            LayerAction::Set { name } => {
+                ipc_request(
+                    &socket_path,
+                    "set_layer",
+                    Some(serde_json::json!({ "layer": name })),
+                )
+            }
+        },
     };
 
     match result {
@@ -122,6 +148,7 @@ fn main() {
                     }
                     println!("Backend:    {}", result["backend"].as_str().unwrap_or("?"));
                     println!("Config:     {}", result["config_path"].as_str().unwrap_or("?"));
+                    println!("Layer:      {}", result["layer"].as_str().unwrap_or("base"));
                     println!("Uptime:     {}s", result["uptime_secs"]);
                 }
                 Command::Toggle => {
@@ -169,6 +196,14 @@ fn main() {
                         }
                     }
                 }
+                Command::Layer { action } => match action {
+                    LayerAction::Get => {
+                        println!("{}", result["layer"].as_str().unwrap_or("base"));
+                    }
+                    LayerAction::Set { name } => {
+                        println!("Layer set to: {}", name);
+                    }
+                },
             }
         }
         Err(e) => {

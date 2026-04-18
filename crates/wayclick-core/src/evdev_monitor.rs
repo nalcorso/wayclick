@@ -209,17 +209,23 @@ fn dispatch_button_event(
     engine: &Arc<Mutex<Engine>>,
     logger: &Arc<Logger>,
 ) {
-    use crate::config::button_code_from_name;
     for bb in &binding.button_bindings {
-        if let Some(btn_code) = button_code_from_name(&bb.code) {
-            if btn_code == code {
-                logger.debug(format!(
-                    "Button {} pressed, firing trigger '{}'",
-                    bb.code, bb.trigger_id
-                ));
-                let mut eng = engine.lock().unwrap();
-                let _ = eng.trigger_event(&bb.trigger_id, true);
+        // Simple single-button match (chord/hold handled in evdev-monitor-rewrite)
+        if bb.codes.len() == 1 && bb.codes[0] == code {
+            // Layer filtering
+            if let Some(ref layer) = bb.layer {
+                let eng = engine.lock().unwrap();
+                if eng.current_layer() != layer {
+                    continue;
+                }
             }
+            let code_name = bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
+            logger.debug(format!(
+                "Button {} pressed, firing trigger '{}'",
+                code_name, bb.trigger_id
+            ));
+            let mut eng = engine.lock().unwrap();
+            let _ = eng.trigger_event(&bb.trigger_id, true);
         }
     }
 }

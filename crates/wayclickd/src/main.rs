@@ -205,14 +205,36 @@ fn main() {
 
     // Signal handling
     let shutdown = Arc::new(AtomicBool::new(false));
+    let reload_signal = Arc::new(AtomicBool::new(false));
 
     // Install signal handlers using nix
-    let _ = signal_hook(shutdown.clone());
+    let _ = signal_hook(shutdown.clone(), reload_signal.clone());
 
     logger.info(format!("wayclickd ready. Socket: {:?}", socket_path));
 
     // Main loop
     while !shutdown.load(Ordering::Relaxed) {
+        // Check for SIGHUP reload
+        if reload_signal.swap(false, Ordering::Relaxed) {
+            logger.info("SIGHUP received, reloading config...");
+            match load_config(&config_path, &logger) {
+                Ok(mut new_config) => {
+                    if dry_run_override {
+                        new_config.options.dry_run = true;
+                    }
+                    // Update engine
+                    engine.lock().unwrap().apply_config(new_config.clone());
+                    // Restart evdev monitor with new bindings
+                    evdev_monitor.stop();
+                    evdev_monitor.configure(new_config.device_bindings);
+                    evdev_monitor.start();
+                    logger.info("Config reloaded via SIGHUP");
+                }
+                Err(e) => {
+                    logger.error(format!("SIGHUP reload failed: {}", e));
+                }
+            }
+        }
         thread::sleep(Duration::from_millis(100));
     }
 
@@ -225,17 +247,25 @@ fn main() {
     logger.info("wayclickd stopped");
 }
 
-fn signal_hook(shutdown: Arc<AtomicBool>) -> Result<(), Box<dyn std::error::Error>> {
+fn signal_hook(
+    shutdown: Arc<AtomicBool>,
+    reload: Arc<AtomicBool>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let shutdown_clone = shutdown.clone();
+    let reload_clone = reload.clone();
     thread::spawn(move || {
         use nix::sys::signal::{SigSet, Signal};
         let mut mask = SigSet::empty();
         mask.add(Signal::SIGINT);
         mask.add(Signal::SIGTERM);
+        mask.add(Signal::SIGHUP);
         mask.thread_block().ok();
         loop {
             match mask.wait() {
-                Ok(_sig) => {
+                Ok(Signal::SIGHUP) => {
+                    reload_clone.store(true, Ordering::Relaxed);
+                }
+                Ok(_) => {
                     shutdown_clone.store(true, Ordering::Relaxed);
                     break;
                 }

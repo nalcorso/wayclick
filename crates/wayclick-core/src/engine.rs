@@ -61,6 +61,7 @@ pub struct Engine {
     enabled: bool,
     start_time: Instant,
     config_path: String,
+    current_layer: String,
 }
 
 impl Engine {
@@ -82,6 +83,7 @@ impl Engine {
             enabled: false,
             start_time: Instant::now(),
             config_path,
+            current_layer: "base".to_string(),
         }
     }
 
@@ -93,6 +95,18 @@ impl Engine {
         }
         self.config = config;
         self.logger.info("Config applied, all workers stopped");
+    }
+
+    /// Get the current active layer name.
+    pub fn current_layer(&self) -> &str {
+        &self.current_layer
+    }
+
+    /// Set the active layer.
+    pub fn set_layer(&mut self, layer: String) {
+        self.logger
+            .info(format!("Layer changed: '{}' -> '{}'", self.current_layer, layer));
+        self.current_layer = layer;
     }
 
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -194,6 +208,15 @@ impl Engine {
     fn handle_oneshot(&mut self, trigger: &TriggerBinding) -> Result<(), EngineError> {
         self.logger
             .info(format!("{}: oneshot executing", trigger.id));
+
+        // Handle SetLayer directly (needs mutable self access)
+        if let ActionConfig::SetLayer { ref layer } = trigger.action {
+            self.set_layer(layer.clone());
+            self.logger
+                .info(format!("{}: oneshot complete", trigger.id));
+            return Ok(());
+        }
+
         execute_action_sync(&trigger.action, &self.backend, &self.logger)?;
         self.logger
             .info(format!("{}: oneshot complete", trigger.id));
@@ -437,6 +460,56 @@ fn execute_action_loop(
         ActionConfig::Delay { duration_ms } => {
             interruptible_sleep(*duration_ms, stop_rx);
         }
+        // These actions are oneshot-only — they don't make sense in a loop context.
+        // Execute once and stop.
+        ActionConfig::MouseMoveAbsolute { x, y } => {
+            backend.move_absolute(*x, *y)?;
+        }
+        ActionConfig::ClickAt {
+            x,
+            y,
+            button,
+            hold_ms,
+        } => {
+            backend.move_absolute(*x, *y)?;
+            thread::sleep(Duration::from_millis(5));
+            do_click(backend, *button, *hold_ms)?;
+        }
+        ActionConfig::Drag {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            button,
+            duration_ms,
+        } => {
+            backend.move_absolute(*from_x, *from_y)?;
+            thread::sleep(Duration::from_millis(5));
+            backend.mouse_press(*button)?;
+            thread::sleep(Duration::from_millis(5));
+
+            let steps = (*duration_ms / 10).max(1);
+            for i in 1..=steps {
+                if stop_rx.try_recv().is_ok() {
+                    backend.mouse_release(*button)?;
+                    return Ok(());
+                }
+                let t = i as f64 / steps as f64;
+                let ix = *from_x as f64 + (*to_x - *from_x) as f64 * t;
+                let iy = *from_y as f64 + (*to_y - *from_y) as f64 * t;
+                backend.move_absolute(ix as i32, iy as i32)?;
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            backend.mouse_release(*button)?;
+        }
+        ActionConfig::SetLayer { layer } => {
+            // Can't actually change layer from a worker thread — log warning
+            logger.warn(format!(
+                "SetLayer('{}') in loop context is not supported; use OneShot mode",
+                layer
+            ));
+        }
         ActionConfig::NoOp => {
             logger.debug("NoOp action, waiting for stop signal");
             let _ = stop_rx.recv();
@@ -535,6 +608,49 @@ fn execute_action_sync(
         ActionConfig::Delay { duration_ms } => {
             thread::sleep(Duration::from_millis(*duration_ms as u64));
         }
+        ActionConfig::MouseMoveAbsolute { x, y } => {
+            backend.move_absolute(*x, *y)?;
+        }
+        ActionConfig::ClickAt {
+            x,
+            y,
+            button,
+            hold_ms,
+        } => {
+            backend.move_absolute(*x, *y)?;
+            thread::sleep(Duration::from_millis(5));
+            do_click(backend, *button, *hold_ms)?;
+        }
+        ActionConfig::Drag {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            button,
+            duration_ms,
+        } => {
+            backend.move_absolute(*from_x, *from_y)?;
+            thread::sleep(Duration::from_millis(5));
+            backend.mouse_press(*button)?;
+            thread::sleep(Duration::from_millis(5));
+
+            // Interpolate movement over duration
+            let steps = (*duration_ms / 10).max(1);
+            for i in 1..=steps {
+                let t = i as f64 / steps as f64;
+                let ix = *from_x as f64 + (*to_x - *from_x) as f64 * t;
+                let iy = *from_y as f64 + (*to_y - *from_y) as f64 * t;
+                backend.move_absolute(ix as i32, iy as i32)?;
+                thread::sleep(Duration::from_millis(10));
+            }
+
+            backend.mouse_release(*button)?;
+        }
+        ActionConfig::SetLayer { layer } => {
+            // SetLayer is handled by the caller (engine) since it needs mutable access.
+            // In sync context, we log it — the actual layer change happens in handle_oneshot.
+            logger.debug(format!("SetLayer action: '{}'", layer));
+        }
         ActionConfig::NoOp => {
             logger.debug("NoOp (sync)");
         }
@@ -598,6 +714,7 @@ mod tests {
             options: GlobalOptions::default(),
             triggers,
             device_bindings: vec![],
+            profile_rules: vec![],
         };
         let engine = Engine::new(
             config,
@@ -825,5 +942,81 @@ mod tests {
         assert_eq!(snaps[0].id, "t1");
         assert!(!snaps[0].active);
         assert_eq!(snaps[0].action_type, "auto_click");
+    }
+
+    #[test]
+    fn test_set_layer_oneshot() {
+        let trigger = TriggerBinding {
+            id: "switch".into(),
+            name: "Switch".into(),
+            description: String::new(),
+            mode: TriggerMode::OneShot,
+            action: ActionConfig::SetLayer {
+                layer: "combat".to_string(),
+            },
+            cooldown_ms: None,
+        };
+        let (mut engine, _) = test_engine(vec![trigger]);
+        engine.set_enabled(true);
+        assert_eq!(engine.current_layer(), "base");
+
+        engine.trigger_event("switch", true).unwrap();
+        assert_eq!(engine.current_layer(), "combat");
+    }
+
+    #[test]
+    fn test_mouse_move_absolute_oneshot() {
+        let trigger = TriggerBinding {
+            id: "move".into(),
+            name: "Move".into(),
+            description: String::new(),
+            mode: TriggerMode::OneShot,
+            action: ActionConfig::MouseMoveAbsolute { x: 1000, y: 2000 },
+            cooldown_ms: None,
+        };
+        let (mut engine, calls) = test_engine(vec![trigger]);
+        engine.set_enabled(true);
+
+        engine.trigger_event("move", true).unwrap();
+        let recorded = calls.lock().unwrap();
+        assert!(recorded.contains(&BackendCall::MoveAbsolute(1000, 2000)));
+    }
+
+    #[test]
+    fn test_click_at_oneshot() {
+        let trigger = TriggerBinding {
+            id: "click".into(),
+            name: "Click".into(),
+            description: String::new(),
+            mode: TriggerMode::OneShot,
+            action: ActionConfig::ClickAt {
+                x: 500,
+                y: 300,
+                button: MouseButton::Left,
+                hold_ms: 0,
+            },
+            cooldown_ms: None,
+        };
+        let (mut engine, calls) = test_engine(vec![trigger]);
+        engine.set_enabled(true);
+
+        engine.trigger_event("click", true).unwrap();
+        let recorded = calls.lock().unwrap();
+        assert!(recorded.contains(&BackendCall::MoveAbsolute(500, 300)));
+        assert!(recorded.contains(&BackendCall::Click(MouseButton::Left)));
+    }
+
+    #[test]
+    fn test_layer_preserved_across_config_reload() {
+        let (mut engine, _) = test_engine(vec![
+            auto_click_trigger("t1", 50, TriggerMode::Toggle),
+        ]);
+        engine.set_layer("combat".to_string());
+        assert_eq!(engine.current_layer(), "combat");
+
+        // Apply new config — layer should be preserved
+        let new_config = Config::default();
+        engine.apply_config(new_config);
+        assert_eq!(engine.current_layer(), "combat");
     }
 }

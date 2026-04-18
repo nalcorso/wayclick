@@ -117,17 +117,86 @@ wayclick.trigger {
 Pauses execution for a fixed duration. Useful between steps in a sequence.
 
 ```lua
-wayclick.trigger {
+wayclick.register_trigger({
     id = "timed_macro",
     mode = "oneshot",
-    action = wayclick.sequence {
+    action = wayclick.sequence({
         actions = {
-            wayclick.auto_click { button = "left" },
-            wayclick.delay { ms = 500 },
-            wayclick.auto_click { button = "left" },
+            wayclick.auto_click({ button = "left" }),
+            wayclick.delay({ ms = 500 }),
+            wayclick.auto_click({ button = "left" }),
         },
-    },
-}
+    }),
+})
+```
+
+### mouse_move_abs
+
+Moves the cursor to an absolute screen position (coordinates 0–32767).
+
+```lua
+wayclick.register_trigger({
+    id = "center_cursor",
+    mode = "oneshot",
+    action = wayclick.mouse_move_abs({ x = 16383, y = 16383 }),
+})
+```
+
+### click_at
+
+Moves cursor to absolute position and clicks.
+
+```lua
+wayclick.register_trigger({
+    id = "click_button",
+    mode = "oneshot",
+    action = wayclick.click_at({
+        x = 1000, y = 500,
+        button = "left",    -- Optional, default: "left"
+        hold_ms = 0,        -- Optional, default: 0
+    }),
+})
+```
+
+### drag
+
+Performs a mouse drag from one position to another with interpolated movement.
+
+```lua
+wayclick.register_trigger({
+    id = "drag_item",
+    mode = "oneshot",
+    action = wayclick.drag({
+        from_x = 100, from_y = 200,
+        to_x = 500, to_y = 400,
+        button = "left",        -- Optional, default: "left"
+        duration_ms = 500,      -- Optional, default: 100
+    }),
+})
+```
+
+### set_layer
+
+Switches the active binding layer. OneShot mode only.
+
+```lua
+wayclick.register_trigger({
+    id = "switch_to_combat",
+    mode = "oneshot",
+    action = wayclick.set_layer({ layer = "combat" }),
+})
+```
+
+### media_key
+
+Convenience wrapper for `key_press` with media key names.
+
+```lua
+wayclick.register_trigger({
+    id = "play_pause",
+    mode = "oneshot",
+    action = wayclick.media_key({ key = "play_pause" }),
+})
 ```
 
 ## Trigger Modes
@@ -141,17 +210,71 @@ wayclick.trigger {
 ## Device Bindings
 
 ```lua
-wayclick.device {
-    name_contains = "G Pro",         -- Match by name substring
+wayclick.bind_device({
+    name = "G Pro",                  -- Match by name substring
     -- vid = 0x046d, pid = 0xc08b,   -- Match by vendor/product ID
-    -- phys_contains = "usb-...",    -- Match by physical location
-    -- path = "/dev/input/event5",   -- Match by device path
+    -- phys = "usb-...",             -- Match by physical location
+    -- path = "/dev/input/event5",   -- Match by device path (deprecated)
     exclusive = false,               -- EVIOCGRAB exclusive access
     bindings = {
+        -- Simple button trigger
         { code = "BTN_SIDE",  trigger = "rapid_fire" },
-        { code = "BTN_EXTRA", trigger = "burst_fire" },
-    }
-}
+
+        -- Keyboard key trigger
+        { code = "KEY_F1", trigger = "toggle_clicker" },
+
+        -- Chord (multiple buttons pressed simultaneously)
+        { code = "BTN_SIDE+BTN_EXTRA", trigger = "combo_action" },
+
+        -- Hold duration (tap vs long-press)
+        { code = "BTN_SIDE", trigger = "tap_action",
+          hold_trigger = "hold_action", hold_ms = 500 },
+
+        -- Layer-specific binding (only active in a specific layer)
+        { code = "BTN_SIDE", trigger = "base_action", layer = "base" },
+        { code = "BTN_SIDE", trigger = "combat_action", layer = "combat" },
+    },
+})
+```
+
+### Binding Options
+
+| Field          | Type     | Description                                              |
+|----------------|----------|----------------------------------------------------------|
+| `code`         | string   | Event code name(s). Use `+` for chords (e.g. `"BTN_SIDE+BTN_EXTRA"`) |
+| `trigger`      | string   | Trigger ID to fire on press (or tap if `hold_trigger` set) |
+| `hold_trigger` | string?  | Trigger ID to fire on long-press (requires `hold_ms`)    |
+| `hold_ms`      | number?  | Hold threshold in ms (requires `hold_trigger`)           |
+| `layer`        | string?  | Only active when this layer is current (nil = all layers)|
+
+## Layers
+
+Layers allow different bindings to be active at different times.
+
+```lua
+-- Switch layer via action
+wayclick.register_trigger({
+    id = "enter_combat",
+    mode = "oneshot",
+    action = wayclick.set_layer({ layer = "combat" }),
+})
+
+-- Layer can also be set via CLI: wayclickctl layer set combat
+```
+
+The default layer is `"base"`. Layer state persists across config reloads.
+
+## Per-App Profiles
+
+Automatically switch layers based on the active window (Hyprland only):
+
+```lua
+wayclick.set_profile({
+    name = "gaming",
+    match_app = "steam_app_.*",    -- Regex on window app_id/class
+    -- match_title = "Minecraft",  -- Regex on window title
+    layer = "combat",              -- Auto-switch to this layer
+})
 ```
 
 ## Lua Modules
@@ -189,4 +312,48 @@ Key names follow the Linux `KEY_*` constants:
 | `KEY_LEFTCTRL` | 29 |
 | `KEY_LEFTALT` | 56 |
 
+### Media Keys
+
+| Name               | Code | Constant             |
+|--------------------|------|----------------------|
+| `KEY_MUTE`         | 113  | `wayclick.keys.MUTE` |
+| `KEY_VOLUMEDOWN`   | 114  | `wayclick.keys.VOLUME_DOWN` |
+| `KEY_VOLUMEUP`     | 115  | `wayclick.keys.VOLUME_UP` |
+| `KEY_NEXTSONG`     | 163  | `wayclick.keys.NEXT_SONG` |
+| `KEY_PLAYPAUSE`    | 164  | `wayclick.keys.PLAY_PAUSE` |
+| `KEY_PREVIOUSSONG` | 165  | `wayclick.keys.PREVIOUS_SONG` |
+| `KEY_STOPCD`       | 166  | `wayclick.keys.STOP_CD` |
+| `KEY_RECORD`       | 167  | `wayclick.keys.RECORD` |
+| `KEY_REWIND`       | 168  | `wayclick.keys.REWIND` |
+| `KEY_FASTFORWARD`  | 208  | `wayclick.keys.FAST_FORWARD` |
+| `KEY_BRIGHTNESSDOWN` | 224 | `wayclick.keys.BRIGHTNESS_DOWN` |
+| `KEY_BRIGHTNESSUP` | 225  | `wayclick.keys.BRIGHTNESS_UP` |
+
 See the full list with `wayclick-evdev-dump monitor`.
+
+## CLI (wayclickctl)
+
+| Command                    | Description                        |
+|----------------------------|------------------------------------|
+| `wayclickctl status`       | Show daemon status                 |
+| `wayclickctl toggle`       | Toggle automation on/off           |
+| `wayclickctl enable`       | Enable automation                  |
+| `wayclickctl disable`      | Disable automation                 |
+| `wayclickctl trigger <id>` | Fire a trigger                     |
+| `wayclickctl list`         | List all triggers                  |
+| `wayclickctl reload`       | Reload configuration               |
+| `wayclickctl logs`         | Show recent log entries            |
+| `wayclickctl layer get`    | Show current active layer          |
+| `wayclickctl layer set <name>` | Switch to a different layer    |
+| `wayclickctl ping`         | Check if daemon is running         |
+
+## SIGHUP Reload
+
+The daemon reloads its configuration on `SIGHUP`:
+
+```bash
+systemctl reload wayclickd    # via systemd
+kill -HUP $(pidof wayclickd)  # direct signal
+```
+
+This reloads the Lua config and restarts the evdev monitor with new bindings.

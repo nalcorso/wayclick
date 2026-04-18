@@ -108,6 +108,7 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
                     "backend": status.backend,
                     "config_path": status.config_path,
                     "uptime_secs": status.uptime_secs,
+                    "layer": engine.current_layer(),
                 }),
             )
         }
@@ -186,6 +187,26 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
                 })
                 .collect();
             make_response(id, json!(logs))
+        }
+
+        "set_layer" => {
+            let layer = params
+                .and_then(|p| p.get("layer"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            if layer.is_empty() {
+                return make_error(id, -32602, "Missing 'layer' parameter");
+            }
+
+            let mut engine = engine.lock().unwrap();
+            engine.set_layer(layer.to_string());
+            make_response(id, json!({ "layer": layer }))
+        }
+
+        "get_layer" => {
+            let engine = engine.lock().unwrap();
+            make_response(id, json!({ "layer": engine.current_layer() }))
         }
 
         _ => make_error(id, -32601, &format!("Method not found: {}", method)),

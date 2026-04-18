@@ -22,6 +22,7 @@ pub trait InputBackend: Send + Sync {
     fn key_release(&self, key_code: u32) -> Result<(), BackendError>;
     fn scroll(&self, direction: ScrollDirection, amount: i32) -> Result<(), BackendError>;
     fn move_relative(&self, dx: i32, dy: i32) -> Result<(), BackendError>;
+    fn move_absolute(&self, x: i32, y: i32) -> Result<(), BackendError>;
     fn name(&self) -> &str;
 }
 
@@ -84,6 +85,12 @@ impl InputBackend for LoggingBackend {
         Ok(())
     }
 
+    fn move_absolute(&self, x: i32, y: i32) -> Result<(), BackendError> {
+        self.logger
+            .debug(format!("DRY RUN move_absolute x={} y={}", x, y));
+        Ok(())
+    }
+
     fn name(&self) -> &str {
         "logging"
     }
@@ -99,6 +106,7 @@ pub enum BackendCall {
     KeyRelease(u32),
     Scroll(ScrollDirection, i32),
     MoveRelative(i32, i32),
+    MoveAbsolute(i32, i32),
 }
 
 pub struct MockBackend {
@@ -176,6 +184,14 @@ impl InputBackend for MockBackend {
             .lock()
             .unwrap()
             .push(BackendCall::MoveRelative(dx, dy));
+        Ok(())
+    }
+
+    fn move_absolute(&self, x: i32, y: i32) -> Result<(), BackendError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(BackendCall::MoveAbsolute(x, y));
         Ok(())
     }
 

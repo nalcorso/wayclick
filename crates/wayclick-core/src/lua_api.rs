@@ -9,6 +9,7 @@ struct ConfigBuilder {
     options: GlobalOptions,
     triggers: Vec<TriggerBinding>,
     device_bindings: Vec<DeviceBinding>,
+    profile_rules: Vec<ProfileRule>,
     warnings: Vec<String>,
 }
 
@@ -18,6 +19,7 @@ impl ConfigBuilder {
             options: GlobalOptions::default(),
             triggers: Vec::new(),
             device_bindings: Vec::new(),
+            profile_rules: Vec::new(),
             warnings: Vec::new(),
         }
     }
@@ -27,6 +29,7 @@ impl ConfigBuilder {
             options: self.options,
             triggers: self.triggers,
             device_bindings: self.device_bindings,
+            profile_rules: self.profile_rules,
         }
     }
 }
@@ -323,6 +326,188 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
         .set("delay", delay)
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
 
+    // wayclick.mouse_move_abs(table) -> action table
+    let mouse_move_abs = lua
+        .create_function(|lua, table: LuaTable| {
+            let x: i32 = table
+                .get::<i32>("x")
+                .map_err(|_| LuaError::RuntimeError("mouse_move_abs requires 'x' field".into()))?;
+            let y: i32 = table
+                .get::<i32>("y")
+                .map_err(|_| LuaError::RuntimeError("mouse_move_abs requires 'y' field".into()))?;
+            let action = lua.create_table()?;
+            action.set("_type", "mouse_move_abs")?;
+            action.set("_x", x)?;
+            action.set("_y", y)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("mouse_move_abs", mouse_move_abs)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    // wayclick.click_at(table) -> action table
+    let click_at = lua
+        .create_function(|lua, table: LuaTable| {
+            let x: i32 = table
+                .get::<i32>("x")
+                .map_err(|_| LuaError::RuntimeError("click_at requires 'x' field".into()))?;
+            let y: i32 = table
+                .get::<i32>("y")
+                .map_err(|_| LuaError::RuntimeError("click_at requires 'y' field".into()))?;
+            let button: String = table.get("button").unwrap_or_else(|_| "left".into());
+            let hold_ms: u32 = table.get("hold_ms").unwrap_or(0);
+            let action = lua.create_table()?;
+            action.set("_type", "click_at")?;
+            action.set("_x", x)?;
+            action.set("_y", y)?;
+            action.set("_button", button)?;
+            action.set("_hold_ms", hold_ms)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("click_at", click_at)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    // wayclick.drag(table) -> action table
+    let drag = lua
+        .create_function(|lua, table: LuaTable| {
+            let from_x: i32 = table
+                .get::<i32>("from_x")
+                .map_err(|_| LuaError::RuntimeError("drag requires 'from_x' field".into()))?;
+            let from_y: i32 = table
+                .get::<i32>("from_y")
+                .map_err(|_| LuaError::RuntimeError("drag requires 'from_y' field".into()))?;
+            let to_x: i32 = table
+                .get::<i32>("to_x")
+                .map_err(|_| LuaError::RuntimeError("drag requires 'to_x' field".into()))?;
+            let to_y: i32 = table
+                .get::<i32>("to_y")
+                .map_err(|_| LuaError::RuntimeError("drag requires 'to_y' field".into()))?;
+            let button: String = table.get("button").unwrap_or_else(|_| "left".into());
+            let duration_ms: u32 = table.get("duration_ms").unwrap_or(100);
+            let action = lua.create_table()?;
+            action.set("_type", "drag")?;
+            action.set("_from_x", from_x)?;
+            action.set("_from_y", from_y)?;
+            action.set("_to_x", to_x)?;
+            action.set("_to_y", to_y)?;
+            action.set("_button", button)?;
+            action.set("_duration_ms", duration_ms)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("drag", drag)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    // wayclick.set_layer(table) -> action table
+    let set_layer = lua
+        .create_function(|lua, table: LuaTable| {
+            let layer: String = table
+                .get::<String>("layer")
+                .map_err(|_| LuaError::RuntimeError("set_layer requires 'layer' field".into()))?;
+            let action = lua.create_table()?;
+            action.set("_type", "set_layer")?;
+            action.set("_layer", layer)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("set_layer", set_layer)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    // wayclick.media_key(table) -> action table (convenience wrapper for key_press with media keys)
+    let media_key = lua
+        .create_function(|lua, table: LuaTable| {
+            let key: String = table
+                .get::<String>("key")
+                .map_err(|_| LuaError::RuntimeError("media_key requires 'key' field".into()))?;
+            // Resolve key name — accept bare names like "play_pause" or full "KEY_PLAYPAUSE"
+            let key_upper = key.to_uppercase();
+            let full_name = if key_upper.starts_with("KEY_") {
+                key_upper.clone()
+            } else {
+                format!("KEY_{}", key_upper)
+            };
+            let code = key_name_to_code(&full_name).ok_or_else(|| {
+                LuaError::RuntimeError(format!("Unknown media key: '{}' (tried '{}')", key, full_name))
+            })?;
+            let action = lua.create_table()?;
+            action.set("_type", "key_press")?;
+            action.set("_key_name", full_name)?;
+            action.set("_key_code", code)?;
+            action.set("_interval_ms", 1u32)?;
+            action.set("_duration_ms", LuaNil)?;
+            action.set("_jitter_ms", 0u32)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("media_key", media_key)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    // wayclick.set_profile(table) - register a profile rule for per-app layer switching
+    let set_profile = lua
+        .create_function(|lua, table: LuaTable| {
+            let name: String = table
+                .get::<String>("name")
+                .map_err(|_| LuaError::RuntimeError("set_profile requires 'name' field".into()))?;
+            let match_app: Option<String> = table.get("match_app").ok();
+            let match_title: Option<String> = table.get("match_title").ok();
+            let layer: String = table
+                .get::<String>("layer")
+                .map_err(|_| LuaError::RuntimeError("set_profile requires 'layer' field".into()))?;
+
+            if match_app.is_none() && match_title.is_none() {
+                return Err(LuaError::RuntimeError(
+                    "set_profile requires at least one of 'match_app' or 'match_title'".into(),
+                ));
+            }
+
+            let mut builder = lua.app_data_mut::<ConfigBuilder>().unwrap();
+            builder.profile_rules.push(ProfileRule {
+                name,
+                match_app,
+                match_title,
+                layer,
+            });
+
+            Ok(())
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("set_profile", set_profile)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    // wayclick.keys - media key constants table
+    let keys_table = lua
+        .create_table()
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    let media_keys = [
+        ("MUTE", 113u32),
+        ("VOLUME_DOWN", 114),
+        ("VOLUME_UP", 115),
+        ("NEXT_SONG", 163),
+        ("PLAY_PAUSE", 164),
+        ("PREVIOUS_SONG", 165),
+        ("STOP_CD", 166),
+        ("RECORD", 167),
+        ("REWIND", 168),
+        ("FAST_FORWARD", 208),
+        ("BRIGHTNESS_DOWN", 224),
+        ("BRIGHTNESS_UP", 225),
+    ];
+    for (name, code) in &media_keys {
+        keys_table
+            .set(*name, *code)
+            .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    }
+    wayclick
+        .set("keys", keys_table)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
     // wayclick.register_trigger(table)
     let register_trigger = lua
         .create_function(|lua, table: LuaTable| {
@@ -414,9 +599,47 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             let mut button_bindings = Vec::new();
             for pair in bindings_table.sequence_values::<LuaTable>() {
                 let binding = pair?;
-                let code: String = binding.get("code")?;
+                let code_str: String = binding.get("code")?;
                 let trigger_id: String = binding.get("trigger")?;
-                button_bindings.push(ButtonBinding { code, trigger_id });
+                let hold_trigger_id: Option<String> = binding.get("hold_trigger").ok();
+                let hold_threshold_ms: Option<u32> = binding.get("hold_ms").ok();
+                let layer: Option<String> = binding.get("layer").ok();
+
+                // Parse code string — supports chords like "BTN_SIDE+BTN_EXTRA"
+                let code_names: Vec<String> = code_str
+                    .split('+')
+                    .map(|s| s.trim().to_string())
+                    .collect();
+
+                let mut codes = Vec::new();
+                for name in &code_names {
+                    match trigger_code_from_name(name) {
+                        Some(c) => codes.push(c),
+                        None => {
+                            return Err(LuaError::RuntimeError(format!(
+                                "Unknown event code: '{}' in bind_device binding",
+                                name
+                            )));
+                        }
+                    }
+                }
+
+                // Validate hold config consistency
+                if hold_trigger_id.is_some() != hold_threshold_ms.is_some() {
+                    return Err(LuaError::RuntimeError(
+                        "bind_device: 'hold_trigger' and 'hold_ms' must both be set together"
+                            .into(),
+                    ));
+                }
+
+                button_bindings.push(ButtonBinding {
+                    codes,
+                    code_names,
+                    trigger_id,
+                    hold_trigger_id,
+                    hold_threshold_ms,
+                    layer,
+                });
             }
 
             let mut builder = lua.app_data_mut::<ConfigBuilder>().unwrap();
@@ -437,8 +660,12 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
     let bind_evdev = lua
         .create_function(|lua, table: LuaTable| {
             let device: String = table.get("device")?;
-            let code: String = table.get("code")?;
+            let code_str: String = table.get("code")?;
             let trigger_id: String = table.get("trigger")?;
+
+            let code = trigger_code_from_name(&code_str).ok_or_else(|| {
+                LuaError::RuntimeError(format!("Unknown event code: '{}'", code_str))
+            })?;
 
             let mut builder = lua.app_data_mut::<ConfigBuilder>().unwrap();
             builder.warnings.push(format!(
@@ -447,7 +674,14 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             ));
             builder.device_bindings.push(DeviceBinding {
                 device_match: DeviceMatch::ByPath { path: device },
-                button_bindings: vec![ButtonBinding { code, trigger_id }],
+                button_bindings: vec![ButtonBinding {
+                    codes: vec![code],
+                    code_names: vec![code_str],
+                    trigger_id,
+                    hold_trigger_id: None,
+                    hold_threshold_ms: None,
+                    layer: None,
+                }],
                 exclusive: false,
             });
 
@@ -550,6 +784,47 @@ fn parse_action_table(table: &LuaTable) -> Result<ActionConfig, LuaError> {
         "delay" => {
             let duration_ms: u32 = table.get("_duration_ms")?;
             Ok(ActionConfig::Delay { duration_ms })
+        }
+        "mouse_move_abs" => {
+            let x: i32 = table.get("_x")?;
+            let y: i32 = table.get("_y")?;
+            Ok(ActionConfig::MouseMoveAbsolute { x, y })
+        }
+        "click_at" => {
+            let x: i32 = table.get("_x")?;
+            let y: i32 = table.get("_y")?;
+            let button_str: String = table.get("_button")?;
+            let button = MouseButton::from_str_name(&button_str)
+                .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+            let hold_ms: u32 = table.get("_hold_ms").unwrap_or(0);
+            Ok(ActionConfig::ClickAt {
+                x,
+                y,
+                button,
+                hold_ms,
+            })
+        }
+        "drag" => {
+            let from_x: i32 = table.get("_from_x")?;
+            let from_y: i32 = table.get("_from_y")?;
+            let to_x: i32 = table.get("_to_x")?;
+            let to_y: i32 = table.get("_to_y")?;
+            let button_str: String = table.get("_button")?;
+            let button = MouseButton::from_str_name(&button_str)
+                .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+            let duration_ms: u32 = table.get("_duration_ms").unwrap_or(100);
+            Ok(ActionConfig::Drag {
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                button,
+                duration_ms,
+            })
+        }
+        "set_layer" => {
+            let layer: String = table.get("_layer")?;
+            Ok(ActionConfig::SetLayer { layer })
         }
         other => Err(LuaError::RuntimeError(format!(
             "Unknown action type: {}",
@@ -1166,5 +1441,391 @@ mod tests {
             }
             _ => panic!("Expected AutoClick"),
         }
+    }
+
+    #[test]
+    fn test_mouse_move_abs_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.mouse_move_abs({ x = 100, y = 200 }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::MouseMoveAbsolute { x, y } => {
+                assert_eq!(*x, 100);
+                assert_eq!(*y, 200);
+            }
+            _ => panic!("Expected MouseMoveAbsolute"),
+        }
+    }
+
+    #[test]
+    fn test_click_at_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.click_at({ x = 500, y = 300, button = "right", hold_ms = 10 }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::ClickAt {
+                x, y, button, hold_ms,
+            } => {
+                assert_eq!(*x, 500);
+                assert_eq!(*y, 300);
+                assert_eq!(*button, MouseButton::Right);
+                assert_eq!(*hold_ms, 10);
+            }
+            _ => panic!("Expected ClickAt"),
+        }
+    }
+
+    #[test]
+    fn test_click_at_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.click_at({ x = 100, y = 100 }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::ClickAt { button, hold_ms, .. } => {
+                assert_eq!(*button, MouseButton::Left);
+                assert_eq!(*hold_ms, 0);
+            }
+            _ => panic!("Expected ClickAt"),
+        }
+    }
+
+    #[test]
+    fn test_drag_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.drag({
+                    from_x = 100, from_y = 200,
+                    to_x = 300, to_y = 400,
+                    button = "left",
+                    duration_ms = 500,
+                }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::Drag {
+                from_x, from_y, to_x, to_y, button, duration_ms,
+            } => {
+                assert_eq!(*from_x, 100);
+                assert_eq!(*from_y, 200);
+                assert_eq!(*to_x, 300);
+                assert_eq!(*to_y, 400);
+                assert_eq!(*button, MouseButton::Left);
+                assert_eq!(*duration_ms, 500);
+            }
+            _ => panic!("Expected Drag"),
+        }
+    }
+
+    #[test]
+    fn test_set_layer_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.set_layer({ layer = "combat" }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::SetLayer { layer } => {
+                assert_eq!(layer, "combat");
+            }
+            _ => panic!("Expected SetLayer"),
+        }
+    }
+
+    #[test]
+    fn test_media_key_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.media_key({ key = "play_pause" }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::KeyPress { key_code, key_name, .. } => {
+                assert_eq!(*key_code, 164); // KEY_PLAYPAUSE
+                assert_eq!(key_name, "KEY_PLAY_PAUSE");
+            }
+            _ => panic!("Expected KeyPress"),
+        }
+    }
+
+    #[test]
+    fn test_media_key_constants() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.key_press({
+                    key_code = wayclick.keys.VOLUME_UP,
+                    key = "KEY_VOLUMEUP",
+                }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::KeyPress { key_code, .. } => {
+                assert_eq!(*key_code, 115);
+            }
+            _ => panic!("Expected KeyPress"),
+        }
+    }
+
+    #[test]
+    fn test_bind_device_keyboard_trigger() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "keyboard",
+                bindings = {
+                    { code = "KEY_F1", trigger = "test" },
+                },
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let binding = &config.device_bindings[0].button_bindings[0];
+        assert_eq!(binding.codes, vec![59]); // KEY_F1 = 59
+        assert_eq!(binding.code_names, vec!["KEY_F1"]);
+    }
+
+    #[test]
+    fn test_bind_device_chord() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "mouse",
+                bindings = {
+                    { code = "BTN_SIDE+BTN_EXTRA", trigger = "test" },
+                },
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let binding = &config.device_bindings[0].button_bindings[0];
+        assert_eq!(binding.codes, vec![0x113, 0x114]);
+        assert_eq!(binding.code_names, vec!["BTN_SIDE", "BTN_EXTRA"]);
+    }
+
+    #[test]
+    fn test_bind_device_hold_trigger() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "tap_action",
+                action = wayclick.noop(),
+            })
+            wayclick.register_trigger({
+                id = "hold_action",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "mouse",
+                bindings = {
+                    { code = "BTN_SIDE", trigger = "tap_action", hold_trigger = "hold_action", hold_ms = 500 },
+                },
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let binding = &config.device_bindings[0].button_bindings[0];
+        assert_eq!(binding.hold_trigger_id, Some("hold_action".to_string()));
+        assert_eq!(binding.hold_threshold_ms, Some(500));
+    }
+
+    #[test]
+    fn test_bind_device_layer_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "mouse",
+                bindings = {
+                    { code = "BTN_SIDE", trigger = "test", layer = "combat" },
+                },
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let binding = &config.device_bindings[0].button_bindings[0];
+        assert_eq!(binding.layer, Some("combat".to_string()));
+    }
+
+    #[test]
+    fn test_bind_device_hold_requires_both_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "mouse",
+                bindings = {
+                    { code = "BTN_SIDE", trigger = "test", hold_trigger = "missing_hold_ms" },
+                },
+            })
+        "#,
+        );
+        assert!(load_config(&path, &test_logger()).is_err());
+    }
+
+    #[test]
+    fn test_set_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.set_profile({
+                name = "gaming",
+                match_app = "steam_app_.*",
+                layer = "combat",
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        assert_eq!(config.profile_rules.len(), 1);
+        assert_eq!(config.profile_rules[0].name, "gaming");
+        assert_eq!(config.profile_rules[0].match_app, Some("steam_app_.*".to_string()));
+        assert_eq!(config.profile_rules[0].layer, "combat");
+    }
+
+    #[test]
+    fn test_trigger_code_from_name() {
+        // BTN_* codes
+        assert_eq!(trigger_code_from_name("BTN_LEFT"), Some(0x110));
+        assert_eq!(trigger_code_from_name("BTN_SIDE"), Some(0x113));
+        // KEY_* codes
+        assert_eq!(trigger_code_from_name("KEY_F1"), Some(59));
+        assert_eq!(trigger_code_from_name("KEY_SPACE"), Some(57));
+        // Media keys
+        assert_eq!(trigger_code_from_name("KEY_PLAYPAUSE"), Some(164));
+        assert_eq!(trigger_code_from_name("KEY_VOLUMEUP"), Some(115));
+        // Bare name (without KEY_ prefix)
+        assert_eq!(trigger_code_from_name("SPACE"), Some(57));
+        // Invalid
+        assert_eq!(trigger_code_from_name("INVALID_CODE_XYZ"), None);
+    }
+
+    #[test]
+    fn test_action_type_names() {
+        assert_eq!(
+            ActionConfig::MouseMoveAbsolute { x: 0, y: 0 }.type_name(),
+            "mouse_move_abs"
+        );
+        assert_eq!(
+            ActionConfig::ClickAt {
+                x: 0, y: 0, button: MouseButton::Left, hold_ms: 0
+            }
+            .type_name(),
+            "click_at"
+        );
+        assert_eq!(
+            ActionConfig::Drag {
+                from_x: 0, from_y: 0, to_x: 0, to_y: 0,
+                button: MouseButton::Left, duration_ms: 100
+            }
+            .type_name(),
+            "drag"
+        );
+        assert_eq!(
+            ActionConfig::SetLayer { layer: "test".into() }.type_name(),
+            "set_layer"
+        );
+    }
+
+    #[test]
+    fn test_is_oneshot_only() {
+        assert!(ActionConfig::SetLayer { layer: "x".into() }.is_oneshot_only());
+        assert!(ActionConfig::ClickAt { x: 0, y: 0, button: MouseButton::Left, hold_ms: 0 }.is_oneshot_only());
+        assert!(ActionConfig::Drag { from_x: 0, from_y: 0, to_x: 1, to_y: 1, button: MouseButton::Left, duration_ms: 100 }.is_oneshot_only());
+        assert!(ActionConfig::MouseMoveAbsolute { x: 0, y: 0 }.is_oneshot_only());
+        assert!(!ActionConfig::NoOp.is_oneshot_only());
+        assert!(!ActionConfig::AutoClick {
+            button: MouseButton::Left, interval_ms: 50, duration_ms: None, jitter_ms: 0, hold_ms: 0
+        }.is_oneshot_only());
     }
 }

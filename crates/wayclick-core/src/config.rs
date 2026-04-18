@@ -160,6 +160,27 @@ pub enum ActionConfig {
         duration_ms: Option<u32>,
         jitter_ms: u32,
     },
+    MouseMoveAbsolute {
+        x: i32,
+        y: i32,
+    },
+    ClickAt {
+        x: i32,
+        y: i32,
+        button: MouseButton,
+        hold_ms: u32,
+    },
+    Drag {
+        from_x: i32,
+        from_y: i32,
+        to_x: i32,
+        to_y: i32,
+        button: MouseButton,
+        duration_ms: u32,
+    },
+    SetLayer {
+        layer: String,
+    },
     Composite {
         mode: CompositeMode,
         actions: Vec<ActionConfig>,
@@ -177,6 +198,10 @@ impl ActionConfig {
             ActionConfig::KeyPress { .. } => "key_press",
             ActionConfig::ScrollWheel { .. } => "scroll",
             ActionConfig::MouseMove { .. } => "mouse_move",
+            ActionConfig::MouseMoveAbsolute { .. } => "mouse_move_abs",
+            ActionConfig::ClickAt { .. } => "click_at",
+            ActionConfig::Drag { .. } => "drag",
+            ActionConfig::SetLayer { .. } => "set_layer",
             ActionConfig::Composite { mode, .. } => match mode {
                 CompositeMode::Parallel => "parallel",
                 CompositeMode::Sequence => "sequence",
@@ -184,6 +209,18 @@ impl ActionConfig {
             ActionConfig::Delay { .. } => "delay",
             ActionConfig::NoOp => "noop",
         }
+    }
+
+    /// Returns true if this action type should only be used in OneShot/Sequence contexts,
+    /// not as the root action of a Toggle/Hold trigger.
+    pub fn is_oneshot_only(&self) -> bool {
+        matches!(
+            self,
+            ActionConfig::SetLayer { .. }
+                | ActionConfig::ClickAt { .. }
+                | ActionConfig::Drag { .. }
+                | ActionConfig::MouseMoveAbsolute { .. }
+        )
     }
 }
 
@@ -209,8 +246,17 @@ pub enum DeviceMatch {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ButtonBinding {
-    pub code: String,
+    /// Resolved evdev event codes (length > 1 = chord)
+    pub codes: Vec<u16>,
+    /// Original code names for display/serialization (e.g., ["BTN_SIDE", "BTN_EXTRA"])
+    pub code_names: Vec<String>,
     pub trigger_id: String,
+    /// Optional trigger fired on long-press (hold_threshold_ms must also be set)
+    pub hold_trigger_id: Option<String>,
+    /// Hold duration threshold in ms (tap fires trigger_id, hold fires hold_trigger_id)
+    pub hold_threshold_ms: Option<u32>,
+    /// Layer filter — None means active in all layers
+    pub layer: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,11 +266,24 @@ pub struct DeviceBinding {
     pub exclusive: bool,
 }
 
+/// Rule for automatic profile/layer switching based on active window.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileRule {
+    pub name: String,
+    /// Regex pattern matched against window app_id/class
+    pub match_app: Option<String>,
+    /// Regex pattern matched against window title
+    pub match_title: Option<String>,
+    /// Layer to switch to when this profile matches
+    pub layer: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub options: GlobalOptions,
     pub triggers: Vec<TriggerBinding>,
     pub device_bindings: Vec<DeviceBinding>,
+    pub profile_rules: Vec<ProfileRule>,
 }
 
 impl Default for Config {
@@ -233,6 +292,7 @@ impl Default for Config {
             options: GlobalOptions::default(),
             triggers: Vec::new(),
             device_bindings: Vec::new(),
+            profile_rules: Vec::new(),
         }
     }
 }
@@ -257,7 +317,7 @@ pub fn normalize_key_name(raw: &str) -> Result<(String, u32), ConfigError> {
 }
 
 /// Maps KEY_* names to Linux input event codes.
-fn key_name_to_code(name: &str) -> Option<u32> {
+pub fn key_name_to_code(name: &str) -> Option<u32> {
     Some(match name {
         "KEY_ESC" => 1,
         "KEY_1" => 2,
@@ -340,13 +400,49 @@ fn key_name_to_code(name: &str) -> Option<u32> {
         "KEY_PAGEDOWN" => 109,
         "KEY_INSERT" => 110,
         "KEY_DELETE" => 111,
+        // Media keys
+        "KEY_MUTE" => 113,
+        "KEY_VOLUMEDOWN" => 114,
+        "KEY_VOLUMEUP" => 115,
+        "KEY_NEXTSONG" => 163,
+        "KEY_PLAYPAUSE" => 164,
+        "KEY_PREVIOUSSONG" => 165,
+        "KEY_STOPCD" => 166,
+        "KEY_RECORD" => 167,
+        "KEY_REWIND" => 168,
+        "KEY_FASTFORWARD" => 208,
+        // Convenience aliases (without underscores)
+        "KEY_PLAY_PAUSE" => 164,
+        "KEY_NEXT_SONG" => 163,
+        "KEY_PREVIOUS_SONG" => 165,
+        "KEY_STOP_CD" => 166,
+        "KEY_VOLUME_UP" => 115,
+        "KEY_VOLUME_DOWN" => 114,
+        "KEY_FAST_FORWARD" => 208,
+        // Screen brightness
+        "KEY_BRIGHTNESSDOWN" => 224,
+        "KEY_BRIGHTNESSUP" => 225,
         _ => return None,
     })
 }
 
 /// Map button code names like "BTN_LEFT", "BTN_SIDE" etc to Linux event codes.
 pub fn button_code_from_name(name: &str) -> Option<u16> {
-    Some(match name.to_uppercase().as_str() {
+    // Delegate to unified resolver, but only accept BTN_* names
+    let upper = name.to_uppercase();
+    if upper.starts_with("BTN_") {
+        trigger_code_from_name(name)
+    } else {
+        None
+    }
+}
+
+/// Unified trigger code resolver: accepts both BTN_* and KEY_* names,
+/// returning the Linux evdev event code as u16.
+pub fn trigger_code_from_name(name: &str) -> Option<u16> {
+    let upper = name.to_uppercase();
+    Some(match upper.as_str() {
+        // BTN_* codes
         "BTN_LEFT" => 0x110,
         "BTN_RIGHT" => 0x111,
         "BTN_MIDDLE" => 0x112,
@@ -355,7 +451,15 @@ pub fn button_code_from_name(name: &str) -> Option<u16> {
         "BTN_FORWARD" => 0x115,
         "BTN_BACK" => 0x116,
         "BTN_TASK" => 0x117,
-        _ => return None,
+        _ => {
+            // Try KEY_* resolution
+            if upper.starts_with("KEY_") {
+                return key_name_to_code(&upper).map(|c| c as u16);
+            }
+            // Try bare name → KEY_ prefix
+            let key_name = format!("KEY_{}", upper);
+            return key_name_to_code(&key_name).map(|c| c as u16);
+        }
     })
 }
 
@@ -379,6 +483,11 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
         for btn in &binding.button_bindings {
             if !trigger_ids.contains(btn.trigger_id.as_str()) {
                 errors.push(ConfigError::UnknownTriggerRef(btn.trigger_id.clone()));
+            }
+            if let Some(ref hold_id) = btn.hold_trigger_id {
+                if !trigger_ids.contains(hold_id.as_str()) {
+                    errors.push(ConfigError::UnknownTriggerRef(hold_id.clone()));
+                }
             }
         }
     }
@@ -406,8 +515,12 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
                     validate_action_intervals(a, min_interval, errors);
                 }
             }
-            ActionConfig::Delay { .. } => {}
-            ActionConfig::NoOp => {}
+            ActionConfig::Delay { .. }
+            | ActionConfig::NoOp
+            | ActionConfig::MouseMoveAbsolute { .. }
+            | ActionConfig::ClickAt { .. }
+            | ActionConfig::Drag { .. }
+            | ActionConfig::SetLayer { .. } => {}
         }
     }
 
@@ -527,6 +640,7 @@ mod tests {
                 cooldown_ms: None,
             }],
             device_bindings: vec![],
+            profile_rules: vec![],
         };
         assert!(validate_config(&config).is_ok());
     }
@@ -545,6 +659,7 @@ mod tests {
             options: GlobalOptions::default(),
             triggers: vec![trigger.clone(), trigger],
             device_bindings: vec![],
+            profile_rules: vec![],
         };
         let errs = validate_config(&config).unwrap_err();
         assert!(errs.iter().any(|e| matches!(e, ConfigError::DuplicateTrigger(_))));
@@ -560,11 +675,16 @@ mod tests {
                     contains: "test".into(),
                 },
                 button_bindings: vec![ButtonBinding {
-                    code: "BTN_LEFT".into(),
+                    codes: vec![0x110],
+                    code_names: vec!["BTN_LEFT".into()],
                     trigger_id: "nonexistent".into(),
+                    hold_trigger_id: None,
+                    hold_threshold_ms: None,
+                    layer: None,
                 }],
                 exclusive: false,
             }],
+            profile_rules: vec![],
         };
         let errs = validate_config(&config).unwrap_err();
         assert!(errs
