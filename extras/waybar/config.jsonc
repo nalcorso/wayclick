@@ -1,0 +1,35 @@
+// Waybar configuration snippet for the wayclick status module.
+// Add this to your ~/.config/waybar/config.jsonc inside the
+// "modules-right" (or "modules-left"/"modules-center") array,
+// then paste the module definition below.
+//
+// Example:
+//   "modules-right": ["custom/wayclick", "clock", ...]
+
+{
+    "custom/wayclick": {
+        // One-shot mode: Waybar polls at the given interval.
+        // For continuous mode, replace "exec" with:
+        //   "exec": "wayclickctl waybar --continuous --interval 2"
+        // and remove "interval".
+        "exec": "wayclickctl waybar",
+        "return-type": "json",
+        "interval": 2,
+
+        // Click actions
+        "on-click": "wayclickctl toggle",
+        "on-click-right": "wayclickctl layer set base",
+
+        // Format with Nerd Font icon (icon comes from the script output)
+        "format": "{}",
+
+        // Tooltip is provided by the script output
+        "tooltip": true,
+
+        // Format icons keyed to percentage (0 = disabled, 100 = enabled)
+        "format-icons": {
+            "0": "󰟸",
+            "100": "󰟸"
+        }
+    }
+}

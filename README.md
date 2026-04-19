@@ -28,6 +28,8 @@ required, fully scriptable with Lua.
 - **TUI dashboard** — real-time view of triggers, devices, and logs
 - **IPC control** — JSON-RPC over Unix socket; control the daemon from scripts,
   keybindings, or the CLI
+- **Waybar integration** — status module with layer display, active trigger
+  indicators, and themed CSS presets
 
 ## Components
 
@@ -140,7 +142,32 @@ wayclickctl reload              # Reload configuration
 wayclickctl layer get           # Show current layer
 wayclickctl layer set <name>    # Switch to a named layer
 wayclickctl logs                # Tail recent log entries
+wayclickctl waybar              # Output Waybar-compatible JSON
+wayclickctl waybar --continuous # Continuous mode for Waybar exec
 ```
+
+## Waybar Integration
+
+A status module for [Waybar](https://github.com/Alexays/Waybar) is included
+in [`extras/waybar/`](extras/waybar/). It displays the daemon state, current
+layer, and active triggers with themed CSS.
+
+```jsonc
+// ~/.config/waybar/config.jsonc
+"custom/wayclick": {
+    "exec": "wayclickctl waybar",
+    "return-type": "json",
+    "interval": 2,
+    "on-click": "wayclickctl toggle",
+    "format": "{}",
+    "tooltip": true
+}
+```
+
+Three display formats are available: `minimal` (icon only), `normal`
+(icon + layer), and `verbose` (icon + layer + active count). Four CSS themes
+are included (Default, Catppuccin, Pill, Gaming). See the
+[module README](extras/waybar/README.md) for full setup instructions.
 
 ## Installation
 
@@ -265,6 +292,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model.
 | [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development workflow, adding actions, code style |
 | [FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) | Comparison with AutoHotkey and XMBC |
 | [HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) | Hyprland keybinding examples |
+| [extras/waybar/](extras/waybar/) | Waybar status module with themes |
 
 ## Contributing
 

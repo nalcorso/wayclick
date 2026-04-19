@@ -1,0 +1,178 @@
+/* ================================================================
+ * Wayclick — Waybar Module Styles
+ *
+ * Add these rules to your ~/.config/waybar/style.css
+ * Choose one theme block below, or mix and match.
+ * ================================================================ */
+
+/* ----------------------------------------------------------------
+ * Base styles (required — always include this)
+ * ---------------------------------------------------------------- */
+
+#custom-wayclick {
+    font-family: "JetBrainsMono Nerd Font", "Symbols Nerd Font", monospace;
+    font-size: 13px;
+    padding: 0 8px;
+    margin: 0 2px;
+    border-radius: 8px;
+    transition: all 0.3s ease;
+}
+
+/* ----------------------------------------------------------------
+ * Theme: Default
+ * Clean, minimal — suits most setups
+ * ---------------------------------------------------------------- */
+
+#custom-wayclick.enabled {
+    color: #a6e3a1;
+}
+
+#custom-wayclick.disabled {
+    color: #585b70;
+    opacity: 0.6;
+}
+
+#custom-wayclick.active {
+    color: #f9e2af;
+}
+
+#custom-wayclick.disconnected {
+    color: #f38ba8;
+    opacity: 0.5;
+}
+
+/* ----------------------------------------------------------------
+ * Theme: Catppuccin Mocha
+ * Uncomment to use with Catppuccin Mocha palette
+ * ---------------------------------------------------------------- */
+
+/*
+#custom-wayclick {
+    background-color: #1e1e2e;
+    border: 1px solid #313244;
+}
+
+#custom-wayclick.enabled {
+    color: #a6e3a1;
+    border-color: #a6e3a1;
+}
+
+#custom-wayclick.disabled {
+    color: #6c7086;
+    background-color: #181825;
+    border-color: #313244;
+}
+
+#custom-wayclick.active {
+    color: #1e1e2e;
+    background-color: #f9e2af;
+    border-color: #f9e2af;
+    font-weight: bold;
+}
+
+#custom-wayclick.disconnected {
+    color: #f38ba8;
+    background-color: #181825;
+    border-color: #f38ba8;
+}
+*/
+
+/* ----------------------------------------------------------------
+ * Theme: Pill
+ * Rounded pill with background color changes
+ * ---------------------------------------------------------------- */
+
+/*
+#custom-wayclick {
+    border-radius: 16px;
+    padding: 0 12px;
+    font-weight: bold;
+}
+
+#custom-wayclick.enabled {
+    color: #1e1e2e;
+    background-color: #a6e3a1;
+}
+
+#custom-wayclick.disabled {
+    color: #bac2de;
+    background-color: #45475a;
+}
+
+#custom-wayclick.active {
+    color: #1e1e2e;
+    background-color: #fab387;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+#custom-wayclick.disconnected {
+    color: #1e1e2e;
+    background-color: #f38ba8;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+*/
+
+/* ----------------------------------------------------------------
+ * Theme: Gaming
+ * High-contrast, animated — for gaming overlays
+ * ---------------------------------------------------------------- */
+
+/*
+#custom-wayclick {
+    font-weight: bold;
+    text-shadow: 0 0 4px currentColor;
+    border-radius: 4px;
+    border: 2px solid transparent;
+}
+
+#custom-wayclick.enabled {
+    color: #50fa7b;
+    border-color: #50fa7b44;
+}
+
+#custom-wayclick.disabled {
+    color: #44475a;
+    border-color: transparent;
+    text-shadow: none;
+}
+
+#custom-wayclick.active {
+    color: #ff79c6;
+    border-color: #ff79c6;
+    text-shadow: 0 0 8px #ff79c6;
+    animation: glow 1s ease-in-out infinite alternate;
+}
+
+#custom-wayclick.disconnected {
+    color: #ff5555;
+    border-color: #ff555544;
+}
+
+@keyframes glow {
+    from { text-shadow: 0 0 4px currentColor; }
+    to { text-shadow: 0 0 12px currentColor, 0 0 20px currentColor; }
+}
+*/
+
+/* ----------------------------------------------------------------
+ * Layer-specific styles (optional — works with any theme)
+ * Add custom colors per layer name
+ * ---------------------------------------------------------------- */
+
+/*
+#custom-wayclick.layer-gaming {
+    color: #ff79c6;
+}
+
+#custom-wayclick.layer-productivity {
+    color: #8be9fd;
+}
+
+#custom-wayclick.layer-media {
+    color: #bd93f9;
+}
+*/

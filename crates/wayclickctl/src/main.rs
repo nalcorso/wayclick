@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 use wayclick_core::config::default_socket_path;
 use wayclick_core::ipc::ipc_request;
@@ -55,6 +55,20 @@ enum Command {
         #[command(subcommand)]
         action: LayerAction,
     },
+    /// Output Waybar-compatible JSON for status display
+    Waybar {
+        /// Run continuously, outputting a JSON line on each update
+        #[arg(long)]
+        continuous: bool,
+
+        /// Poll interval in seconds (continuous mode only)
+        #[arg(long, default_value = "2")]
+        interval: u64,
+
+        /// Display format
+        #[arg(long, default_value = "normal")]
+        format: WaybarFormat,
+    },
 }
 
 #[derive(Subcommand)]
@@ -66,6 +80,16 @@ enum LayerAction {
         /// Layer name to switch to
         name: String,
     },
+}
+
+#[derive(Clone, ValueEnum)]
+enum WaybarFormat {
+    /// Icon only
+    Minimal,
+    /// Icon and layer name
+    Normal,
+    /// Icon, layer name, and active trigger count
+    Verbose,
 }
 
 fn main() {
@@ -102,6 +126,14 @@ fn main() {
                 Some(serde_json::json!({ "layer": name })),
             ),
         },
+        Command::Waybar {
+            continuous,
+            interval,
+            format,
+        } => {
+            run_waybar(&socket_path, *continuous, *interval, format);
+            return;
+        }
     };
 
     match result {
@@ -201,6 +233,7 @@ fn main() {
                         println!("Layer set to: {}", name);
                     }
                 },
+                Command::Waybar { .. } => unreachable!(),
             }
         }
         Err(e) => {
@@ -212,5 +245,165 @@ fn main() {
             }
             std::process::exit(1);
         }
+    }
+}
+
+fn format_uptime(secs: u64) -> String {
+    if secs < 60 {
+        format!("{}s", secs)
+    } else if secs < 3600 {
+        format!("{}m {}s", secs / 60, secs % 60)
+    } else {
+        let h = secs / 3600;
+        let m = (secs % 3600) / 60;
+        format!("{}h {}m", h, m)
+    }
+}
+
+fn waybar_json_owned(
+    text: &str,
+    tooltip: &str,
+    classes: &[String],
+    percentage: u8,
+) -> serde_json::Value {
+    serde_json::json!({
+        "text": text,
+        "tooltip": tooltip,
+        "class": classes,
+        "percentage": percentage,
+    })
+}
+
+fn waybar_disconnected() -> serde_json::Value {
+    waybar_json_owned(
+        "󰟸 ✗",
+        "wayclick: not running",
+        &["disconnected".to_string()],
+        0,
+    )
+}
+
+fn waybar_from_status(status: &serde_json::Value, format: &WaybarFormat) -> serde_json::Value {
+    let enabled = status["enabled"].as_bool().unwrap_or(false);
+    let layer = status["layer"]
+        .as_str()
+        .or_else(|| status["current_layer"].as_str())
+        .unwrap_or("base");
+    let active = status["active_triggers"]
+        .as_array()
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let trigger_count = status["trigger_count"].as_u64().unwrap_or(0);
+    let uptime = status["uptime_secs"].as_u64().unwrap_or(0);
+    let dry_run = status["dry_run"].as_bool().unwrap_or(false);
+
+    // Build display text
+    let layer_display = titlecase(layer);
+    let text = if !enabled {
+        "󰟸 Off".to_string()
+    } else {
+        match format {
+            WaybarFormat::Minimal => "󰟸".to_string(),
+            WaybarFormat::Normal => format!("󰟸 {}", layer_display),
+            WaybarFormat::Verbose => {
+                if active > 0 {
+                    format!("󰟸 {} ⚡{}", layer_display, active)
+                } else {
+                    format!("󰟸 {}", layer_display)
+                }
+            }
+        }
+    };
+
+    // Build tooltip
+    let state_str = if !enabled {
+        "disabled".to_string()
+    } else if dry_run {
+        "enabled (dry-run)".to_string()
+    } else {
+        "enabled".to_string()
+    };
+
+    let active_list = if active > 0 {
+        let names: Vec<&str> = status["active_triggers"]
+            .as_array()
+            .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
+            .unwrap_or_default();
+        format!("\nActive: {}", names.join(", "))
+    } else {
+        String::new()
+    };
+
+    let tooltip = format!(
+        "wayclick: {}\nLayer: {}\nTriggers: {} ({} active){}\nUptime: {}",
+        state_str,
+        layer,
+        trigger_count,
+        active,
+        active_list,
+        format_uptime(uptime),
+    );
+
+    // Build CSS classes
+    let mut classes: Vec<String> = Vec::new();
+    if enabled {
+        classes.push("enabled".to_string());
+    } else {
+        classes.push("disabled".to_string());
+    }
+
+    classes.push(format!("layer-{}", layer.to_lowercase().replace(' ', "-")));
+
+    if active > 0 {
+        classes.push("active".to_string());
+    } else {
+        classes.push("idle".to_string());
+    }
+
+    if dry_run {
+        classes.push("dry-run".to_string());
+    }
+
+    let percentage: u8 = if enabled { 100 } else { 0 };
+    waybar_json_owned(&text, &tooltip, &classes, percentage)
+}
+
+fn titlecase(s: &str) -> String {
+    let mut chars = s.chars();
+    match chars.next() {
+        None => String::new(),
+        Some(c) => c.to_uppercase().to_string() + &chars.as_str().to_lowercase(),
+    }
+}
+
+fn run_waybar(
+    socket_path: &std::path::Path,
+    continuous: bool,
+    interval: u64,
+    format: &WaybarFormat,
+) {
+    if continuous {
+        loop {
+            let output = fetch_waybar_output(socket_path, format);
+            println!("{}", output);
+            std::thread::sleep(std::time::Duration::from_secs(interval));
+        }
+    } else {
+        let output = fetch_waybar_output(socket_path, format);
+        println!("{}", output);
+    }
+}
+
+fn fetch_waybar_output(socket_path: &std::path::Path, format: &WaybarFormat) -> String {
+    match ipc_request(socket_path, "status", None) {
+        Ok(response) => {
+            if let Some(result) = response.get("result") {
+                let json = waybar_from_status(result, format);
+                serde_json::to_string(&json).unwrap_or_default()
+            } else {
+                serde_json::to_string(&waybar_disconnected()).unwrap_or_default()
+            }
+        }
+        Err(_) => serde_json::to_string(&waybar_disconnected()).unwrap_or_default(),
     }
 }
