@@ -42,8 +42,8 @@ pub fn load_config(path: &Path, logger: &Arc<Logger>) -> Result<Config, ConfigEr
         .unwrap_or_else(|| Path::new("."))
         .to_path_buf();
 
-    // Set up sandbox: remove dangerous functions
-    sandbox_lua(&lua)?;
+    // Set up sandbox: remove dangerous functions, restrict io.open to config dir
+    sandbox_lua(&lua, &config_dir)?;
 
     // Set up sandboxed require
     setup_sandboxed_require(&lua, &config_dir)?;
@@ -86,28 +86,76 @@ pub fn load_config(path: &Path, logger: &Arc<Logger>) -> Result<Config, ConfigEr
     Ok(config)
 }
 
-fn sandbox_lua(lua: &Lua) -> Result<(), ConfigError> {
-    lua.load(
+fn sandbox_lua(lua: &Lua, config_dir: &Path) -> Result<(), ConfigError> {
+    // Canonicalize the config directory for path validation.
+    // io.open will only be allowed to read files within this directory.
+    let canonical_config_dir = config_dir
+        .canonicalize()
+        .unwrap_or_else(|_| config_dir.to_path_buf());
+
+    // Rust-side path validator: resolves relative paths against config_dir,
+    // resolves symlinks and ../ traversals via canonicalize(),
+    // then checks the real path is within the config directory.
+    let config_dir_for_resolve = canonical_config_dir.clone();
+    let config_dir_for_lua = canonical_config_dir.clone();
+    let validate_path = lua
+        .create_function(move |_, path: String| {
+            let p = std::path::Path::new(&path);
+            // Resolve relative paths against the config directory
+            let absolute = if p.is_relative() {
+                config_dir_for_resolve.join(p)
+            } else {
+                p.to_path_buf()
+            };
+            match absolute.canonicalize() {
+                Ok(canonical) => Ok(canonical.starts_with(&canonical_config_dir)),
+                // Non-existent file or permission error — block the read
+                Err(_) => Ok(false),
+            }
+        })
+        .map_err(|e| ConfigError::Lua(format!("Failed to create path validator: {}", e)))?;
+
+    lua.globals()
+        .set("__validate_path", validate_path)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    let config_dir_lua = config_dir_for_lua
+        .to_string_lossy()
+        .to_string()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+
+    lua.load(format!(
         r#"
         os.execute = nil
         os.exit = nil
         if io then
             io.popen = nil
-            -- Block write-mode io.open
             local orig_open = io.open
+            local validate = __validate_path
+            local config_dir = "{}"
             io.open = function(path, mode)
                 if mode and (mode:find("w") or mode:find("a")) then
                     return nil, "write access denied in sandbox"
                 end
+                if not validate(path) then
+                    return nil, "read access denied: path is outside config directory"
+                end
+                -- Resolve relative paths against config directory
+                if path:sub(1,1) ~= "/" then
+                    path = config_dir .. "/" .. path
+                end
                 return orig_open(path, mode)
             end
         end
+        __validate_path = nil
         load = nil
         loadfile = nil
         dofile = nil
         debug = nil
     "#,
-    )
+        config_dir_lua
+    ))
     .exec()
     .map_err(|e| ConfigError::Lua(format!("Failed to set up sandbox: {}", e)))?;
     Ok(())
@@ -1226,6 +1274,97 @@ mod tests {
         let result = load_config(&path, &test_logger());
         // io.popen is nil, so calling it should error
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_sandbox_io_open_blocks_outside_config_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            local f, err = io.open("/etc/hostname", "r")
+            if f then
+                error("io.open should have been blocked for files outside config dir")
+            end
+            if not err:find("outside config directory") then
+                error("Expected 'outside config directory' error, got: " .. err)
+            end
+        "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(
+            result.is_ok(),
+            "Script should handle the blocked read gracefully"
+        );
+    }
+
+    #[test]
+    fn test_sandbox_io_open_blocks_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            local f, err = io.open("../../../etc/hostname", "r")
+            if f then
+                error("io.open should have blocked path traversal")
+            end
+        "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_sandbox_io_open_allows_config_dir_reads() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // Create a data file in the config directory
+        let data_path = dir.path().join("data.txt");
+        fs::write(&data_path, "test_data_123").unwrap();
+
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            local f, err = io.open("data.txt", "r")
+            if not f then
+                error("io.open should allow reads in config dir: " .. (err or "unknown"))
+            end
+            local content = f:read("*a")
+            f:close()
+            if content ~= "test_data_123" then
+                error("Expected 'test_data_123', got: " .. content)
+            end
+        "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(
+            result.is_ok(),
+            "Should be able to read files in config dir: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_sandbox_io_open_still_blocks_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            local f, err = io.open("output.txt", "w")
+            if f then
+                error("io.open should block write mode")
+            end
+            if not err:find("write access denied") then
+                error("Expected 'write access denied' error, got: " .. err)
+            end
+        "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_ok());
     }
 
     #[test]
