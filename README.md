@@ -231,6 +231,8 @@ mise run test       # Run all tests
 mise run lint       # Clippy with strict warnings
 mise run check      # fmt + clippy + test (full pre-commit check)
 mise run audit      # Security audit of dependencies
+mise run bench      # Run Criterion benchmarks
+mise run bench-report  # Run benchmarks + save timestamped JSON report
 ```
 
 ### Without mise
@@ -243,6 +245,26 @@ cargo fmt --all -- --check
 ```
 
 See [docs/BUILDING.md](docs/BUILDING.md) for cross-compilation and fuzz testing.
+
+### Benchmarks
+
+Criterion.rs micro-benchmarks cover the three critical paths:
+
+| Group | What it measures |
+|-------|-----------------|
+| `action_execution` | Click dispatch, action sequences, parallel execution, toggle lifecycle |
+| `config_loading` | Lua config parsing at various complexity levels (1–100 triggers, nesting depth) |
+| `ipc_framing` | JSON-RPC frame encode/decode, Unix socket roundtrip |
+
+```sh
+# Quick smoke test (~1 min)
+mise run bench-quick
+
+# Full benchmark suite with saved report
+mise run bench-report    # → bench-results/<timestamp>-<commit>.json
+```
+
+Reports include git commit, system info (CPU model, governor, memory), and per-benchmark confidence intervals.
 
 ## Architecture
 

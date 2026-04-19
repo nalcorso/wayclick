@@ -690,6 +690,41 @@ fn interruptible_sleep(ms: u32, stop_rx: &mpsc::Receiver<()>) -> bool {
     true
 }
 
+/// Public wrappers for benchmarking internal engine functions.
+/// Only available when the `bench-internals` feature is enabled.
+#[cfg(feature = "bench-internals")]
+pub mod bench {
+    use super::*;
+
+    /// Benchmark wrapper for `execute_action_sync`.
+    pub fn bench_execute_action_sync(
+        action: &ActionConfig,
+        backend: &Arc<dyn InputBackend>,
+        logger: &Arc<Logger>,
+    ) -> Result<(), BackendError> {
+        execute_action_sync(action, backend, logger)
+    }
+
+    /// Benchmark wrapper for `do_click`.
+    pub fn bench_do_click(
+        backend: &Arc<dyn InputBackend>,
+        button: MouseButton,
+        hold_ms: u32,
+    ) -> Result<(), BackendError> {
+        do_click(backend, button, hold_ms)
+    }
+
+    /// Benchmark wrapper for `jittered_interval`.
+    pub fn bench_jittered_interval(interval_ms: u32, jitter_ms: u32) -> u32 {
+        jittered_interval(interval_ms, jitter_ms)
+    }
+
+    /// Benchmark wrapper for `interruptible_sleep`.
+    pub fn bench_interruptible_sleep(ms: u32, stop_rx: &mpsc::Receiver<()>) -> bool {
+        interruptible_sleep(ms, stop_rx)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

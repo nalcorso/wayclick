@@ -50,3 +50,15 @@ cargo +nightly fuzz run fuzz_config_loader -- -max_total_time=60
 cargo +nightly fuzz run fuzz_ipc_frame -- -max_total_time=60
 cargo +nightly fuzz run fuzz_device_match -- -max_total_time=60
 """
+
+[tasks.bench]
+description = "Run Criterion benchmarks"
+run = "cargo bench --features bench-internals"
+
+[tasks.bench-quick]
+description = "Quick benchmark smoke test (reduced samples)"
+run = "cargo bench --features bench-internals -- --sample-size 10 --warm-up-time 1 --measurement-time 3"
+
+[tasks.bench-report]
+description = "Run benchmarks and save timestamped JSON report"
+run = "./scripts/bench-report.sh"

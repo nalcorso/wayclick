@@ -206,6 +206,43 @@ impl InputBackend for MockBackend {
     }
 }
 
+/// Zero-overhead backend for benchmarking. Does nothing — no recording, no I/O.
+/// Use this when measuring pure engine overhead without backend cost.
+pub struct NullBackend;
+
+impl InputBackend for NullBackend {
+    fn init(&mut self) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn click(&self, _button: MouseButton) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn mouse_press(&self, _button: MouseButton) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn mouse_release(&self, _button: MouseButton) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn key_press(&self, _key_code: u32) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn key_release(&self, _key_code: u32) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn scroll(&self, _direction: ScrollDirection, _amount: i32) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn move_relative(&self, _dx: i32, _dy: i32) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn move_absolute(&self, _x: i32, _y: i32) -> Result<(), BackendError> {
+        Ok(())
+    }
+    fn name(&self) -> &str {
+        "null"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
