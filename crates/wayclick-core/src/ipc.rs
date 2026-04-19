@@ -4,10 +4,15 @@ use serde_json::{json, Value};
 use std::io::{self, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use thiserror::Error;
+
+/// Maximum concurrent IPC client connections.
+/// Prevents connection flood attacks from exhausting system threads.
+const MAX_IPC_CONNECTIONS: usize = 32;
 
 #[derive(Debug, Error)]
 pub enum IpcError {
@@ -210,12 +215,24 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
     }
 }
 
+/// RAII guard that decrements the connection counter when dropped.
+struct ConnectionGuard {
+    counter: Arc<AtomicUsize>,
+}
+
+impl Drop for ConnectionGuard {
+    fn drop(&mut self) {
+        self.counter.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 pub struct IpcServer {
     socket_path: PathBuf,
     listener: Option<UnixListener>,
     engine: Arc<Mutex<Engine>>,
     logger: Arc<Logger>,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
+    connection_count: Arc<AtomicUsize>,
 }
 
 impl IpcServer {
@@ -253,6 +270,7 @@ impl IpcServer {
             engine,
             logger,
             shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            connection_count: Arc::new(AtomicUsize::new(0)),
         })
     }
 
@@ -274,9 +292,24 @@ impl IpcServer {
 
             match listener.accept() {
                 Ok((stream, _addr)) => {
+                    let current = self.connection_count.fetch_add(1, Ordering::Relaxed);
+                    if current >= MAX_IPC_CONNECTIONS {
+                        self.connection_count.fetch_sub(1, Ordering::Relaxed);
+                        self.logger.warn(format!(
+                            "IPC connection rejected: {} active connections (max {})",
+                            current, MAX_IPC_CONNECTIONS
+                        ));
+                        drop(stream);
+                        continue;
+                    }
+
                     let engine = self.engine.clone();
                     let logger = self.logger.clone();
+                    let guard = ConnectionGuard {
+                        counter: self.connection_count.clone(),
+                    };
                     thread::spawn(move || {
+                        let _guard = guard;
                         handle_client(stream, engine, logger);
                     });
                 }

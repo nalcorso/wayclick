@@ -1,8 +1,26 @@
 use crate::config::*;
 use crate::logger::Logger;
 use mlua::prelude::*;
+use std::cell::Cell;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
+
+/// Maximum number of Lua VM instructions allowed during config loading.
+/// Prevents infinite loops from blocking startup forever.
+/// 10 million instructions is generous (~2-3 seconds of Lua execution).
+const LUA_INSTRUCTION_LIMIT: u32 = 10_000_000;
+
+/// How often the instruction-count hook fires (every N instructions).
+const LUA_HOOK_INTERVAL: u32 = 10_000;
+
+/// Maximum nesting depth for composite actions (sequence/parallel).
+/// Prevents stack overflow from deeply nested action trees.
+const MAX_ACTION_DEPTH: usize = 32;
+
+/// Maximum number of sub-actions in a single parallel composite.
+/// Prevents thread explosion from spawning too many concurrent threads.
+const MAX_PARALLEL_ACTIONS: usize = 64;
 
 /// Internal builder used as upvalue in Lua closures.
 struct ConfigBuilder {
@@ -54,12 +72,35 @@ pub fn load_config(path: &Path, logger: &Arc<Logger>) -> Result<Config, ConfigEr
     // Register the wayclick global table
     register_wayclick_api(&lua, logger)?;
 
-    // Execute the config file
+    // Execute the config file with instruction limit to prevent infinite loops
     let source = std::fs::read_to_string(path).map_err(ConfigError::Io)?;
+
+    // Install instruction-count hook to abort runaway Lua scripts
+    let instruction_count = Rc::new(Cell::new(0u32));
+    let counter = instruction_count.clone();
+    let max_callbacks = LUA_INSTRUCTION_LIMIT / LUA_HOOK_INTERVAL;
+    lua.set_hook(
+        mlua::HookTriggers::new().every_nth_instruction(LUA_HOOK_INTERVAL),
+        move |_lua, _debug| {
+            let count = counter.get() + 1;
+            counter.set(count);
+            if count >= max_callbacks {
+                return Err(LuaError::RuntimeError(format!(
+                    "Config exceeded instruction limit ({} instructions). \
+                     Possible infinite loop in Lua config.",
+                    LUA_INSTRUCTION_LIMIT
+                )));
+            }
+            Ok(mlua::VmState::Continue)
+        },
+    );
+
     lua.load(&source)
         .set_name(path.to_string_lossy())
         .exec()
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    lua.remove_hook();
 
     // Extract config from builder
     let builder = lua
@@ -578,7 +619,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 LuaError::RuntimeError("register_trigger requires 'action' field".into())
             })?;
 
-            let action = parse_action_table(&action_table)?;
+            let action = parse_action_table(&action_table, 0)?;
 
             let mut builder = lua.app_data_mut::<ConfigBuilder>().unwrap();
             builder.triggers.push(TriggerBinding {
@@ -753,7 +794,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
 }
 
 /// Parse a Lua action table (returned by auto_click, key_press, etc.) into an ActionConfig.
-fn parse_action_table(table: &LuaTable) -> Result<ActionConfig, LuaError> {
+fn parse_action_table(table: &LuaTable, depth: usize) -> Result<ActionConfig, LuaError> {
     let action_type: String = table.get("_type")?;
 
     match action_type.as_str() {
@@ -818,16 +859,35 @@ fn parse_action_table(table: &LuaTable) -> Result<ActionConfig, LuaError> {
             })
         }
         "sequence" => {
+            if depth >= MAX_ACTION_DEPTH {
+                return Err(LuaError::RuntimeError(format!(
+                    "Action nesting depth exceeds maximum of {}",
+                    MAX_ACTION_DEPTH
+                )));
+            }
             let actions_table: LuaTable = table.get("_actions")?;
-            let actions = parse_action_list(&actions_table)?;
+            let actions = parse_action_list(&actions_table, depth + 1)?;
             Ok(ActionConfig::Composite {
                 mode: CompositeMode::Sequence,
                 actions,
             })
         }
         "parallel" => {
+            if depth >= MAX_ACTION_DEPTH {
+                return Err(LuaError::RuntimeError(format!(
+                    "Action nesting depth exceeds maximum of {}",
+                    MAX_ACTION_DEPTH
+                )));
+            }
             let actions_table: LuaTable = table.get("_actions")?;
-            let actions = parse_action_list(&actions_table)?;
+            let actions = parse_action_list(&actions_table, depth + 1)?;
+            if actions.len() > MAX_PARALLEL_ACTIONS {
+                return Err(LuaError::RuntimeError(format!(
+                    "Parallel action has {} sub-actions (maximum is {})",
+                    actions.len(),
+                    MAX_PARALLEL_ACTIONS
+                )));
+            }
             Ok(ActionConfig::Composite {
                 mode: CompositeMode::Parallel,
                 actions,
@@ -886,11 +946,11 @@ fn parse_action_table(table: &LuaTable) -> Result<ActionConfig, LuaError> {
     }
 }
 
-fn parse_action_list(table: &LuaTable) -> Result<Vec<ActionConfig>, LuaError> {
+fn parse_action_list(table: &LuaTable, depth: usize) -> Result<Vec<ActionConfig>, LuaError> {
     let mut actions = Vec::new();
     for value in table.sequence_values::<LuaTable>() {
         let t = value?;
-        actions.push(parse_action_table(&t)?);
+        actions.push(parse_action_table(&t, depth)?);
     }
     Ok(actions)
 }
@@ -2018,5 +2078,150 @@ mod tests {
             hold_ms: 0
         }
         .is_oneshot_only());
+    }
+
+    // ---- Resource exhaustion safety tests ----
+
+    #[test]
+    fn test_lua_instruction_limit_blocks_infinite_loop() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            while true do end
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("instruction limit"),
+            "Expected instruction limit error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_action_nesting_depth_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            local action = wayclick.noop()
+            for i = 1, 50 do
+                action = wayclick.sequence({ actions = { action } })
+            end
+            wayclick.register_trigger({
+                id = "deep",
+                action = action,
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("nesting depth"),
+            "Expected nesting depth error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_action_nesting_within_limit_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            local action = wayclick.noop()
+            for i = 1, 5 do
+                action = wayclick.sequence({ actions = { action } })
+            end
+            wayclick.register_trigger({
+                id = "shallow",
+                action = action,
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_parallel_action_count_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            local actions = {}
+            for i = 1, 100 do
+                actions[i] = wayclick.noop()
+            end
+            wayclick.register_trigger({
+                id = "big_parallel",
+                action = wayclick.parallel({ actions = actions }),
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("sub-actions") || err.contains("maximum"),
+            "Expected parallel sub-action limit error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_parallel_action_within_limit_succeeds() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            local actions = {}
+            for i = 1, 10 do
+                actions[i] = wayclick.noop()
+            end
+            wayclick.register_trigger({
+                id = "small_parallel",
+                action = wayclick.parallel({ actions = actions }),
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_normal_config_within_instruction_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            for i = 1, 100 do
+                wayclick.register_trigger({
+                    id = "trigger_" .. i,
+                    action = wayclick.sequence({
+                        actions = {
+                            wayclick.auto_click({ button = "left", interval_ms = 50 }),
+                            wayclick.delay({ ms = 100 }),
+                            wayclick.key_press({ key = "a" }),
+                        }
+                    }),
+                })
+            end
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert_eq!(config.triggers.len(), 100);
     }
 }

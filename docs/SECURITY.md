@@ -110,7 +110,33 @@ This is a "user configures their own keylogger" scenario — equivalent to runni
 - The IPC socket is created with mode `0600` (user read/write only)
 - Located in `$XDG_RUNTIME_DIR` (typically `/run/user/<uid>/`)
 - JSON-RPC frames are limited to 64KB maximum
+- Concurrent connections capped at 32 (prevents connection flood DoS)
 - Unknown methods return an error; they do not execute anything
+
+### Resource Exhaustion Protections
+
+Wayclick enforces hard limits to prevent accidental or malicious resource exhaustion:
+
+| Protection | Limit | Rationale |
+|------------|-------|-----------|
+| Lua instruction count | 10,000,000 | Prevents infinite loops during config loading (~2-3 seconds of Lua execution) |
+| Action nesting depth | 32 levels | Prevents stack overflow from deeply nested sequence/parallel trees |
+| Parallel sub-actions | 64 per composite | Prevents thread explosion from spawning too many concurrent threads |
+| IPC concurrent clients | 32 connections | Prevents connection flood attacks from exhausting system threads |
+| systemd MemoryMax | 256MB | Prevents unbounded memory consumption |
+| systemd TasksMax | 128 threads | Prevents thread explosion at the OS level |
+| systemd CPUQuota | 50% | Prevents CPU starvation of other applications |
+| Minimum click interval | 1ms (configurable) | Prevents tight CPU loops from auto-click actions |
+
+**Design decision:** All safety limits are compile-time constants, not user-configurable. They are generous enough for any practical config but prevent catastrophic resource exhaustion.
+
+**What is NOT possible from a Lua config:**
+
+- ❌ Fork bombs — `os.execute` is nil, no process spawning
+- ❌ Network access — no sockets, no HTTP, no DNS
+- ❌ Infinite loops blocking startup — instruction count hook aborts after 10M instructions
+- ❌ Stack overflow from nested actions — depth capped at 32
+- ❌ Thread explosion from parallel actions — capped at 64 sub-actions per composite
 
 ## Recommendations
 

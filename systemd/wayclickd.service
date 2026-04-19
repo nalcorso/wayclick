@@ -14,6 +14,11 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=%t
 PrivateTmp=true
+# Resource limits — prevent runaway resource consumption
+MemoryMax=256M
+TasksMax=128
+CPUQuota=50%
+LimitNOFILE=256
 
 [Install]
 WantedBy=default.target

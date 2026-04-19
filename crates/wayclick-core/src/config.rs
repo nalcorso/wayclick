@@ -516,8 +516,38 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
         }
     }
 
+    /// Maximum nesting depth for composite actions (sequence/parallel).
+    const MAX_ACTION_DEPTH: usize = 32;
+
+    /// Maximum number of sub-actions in a single parallel composite.
+    const MAX_PARALLEL_ACTIONS: usize = 64;
+
+    // Validate action nesting depth and parallel sub-action counts
+    fn validate_action_depth(action: &ActionConfig, depth: usize, errors: &mut Vec<ConfigError>) {
+        if let ActionConfig::Composite { mode, actions } = action {
+            if depth >= MAX_ACTION_DEPTH {
+                errors.push(ConfigError::Validation(format!(
+                    "Action nesting depth exceeds maximum of {}",
+                    MAX_ACTION_DEPTH
+                )));
+                return;
+            }
+            if *mode == CompositeMode::Parallel && actions.len() > MAX_PARALLEL_ACTIONS {
+                errors.push(ConfigError::Validation(format!(
+                    "Parallel action has {} sub-actions (maximum is {})",
+                    actions.len(),
+                    MAX_PARALLEL_ACTIONS
+                )));
+            }
+            for a in actions {
+                validate_action_depth(a, depth + 1, errors);
+            }
+        }
+    }
+
     for trigger in &config.triggers {
         validate_action_intervals(&trigger.action, config.options.min_interval_ms, &mut errors);
+        validate_action_depth(&trigger.action, 0, &mut errors);
     }
 
     if errors.is_empty() {
@@ -746,5 +776,59 @@ mod tests {
         assert_eq!(config.options.min_interval_ms, 1);
         assert!(config.triggers.is_empty());
         assert!(config.device_bindings.is_empty());
+    }
+
+    #[test]
+    fn test_validate_config_action_depth_limit() {
+        // Build a deeply nested action that exceeds MAX_ACTION_DEPTH (32)
+        let mut action = ActionConfig::NoOp;
+        for _ in 0..40 {
+            action = ActionConfig::Composite {
+                mode: CompositeMode::Sequence,
+                actions: vec![action],
+            };
+        }
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "deep".into(),
+                name: "Deep".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action,
+                cooldown_ms: None,
+            }],
+            ..Config::default()
+        };
+        let result = validate_config(&config);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors
+            .iter()
+            .any(|e| e.to_string().contains("nesting depth")));
+    }
+
+    #[test]
+    fn test_validate_config_parallel_action_limit() {
+        // Build a parallel with 100 sub-actions (exceeds MAX_PARALLEL_ACTIONS=64)
+        let actions: Vec<ActionConfig> = (0..100).map(|_| ActionConfig::NoOp).collect();
+        let action = ActionConfig::Composite {
+            mode: CompositeMode::Parallel,
+            actions,
+        };
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "big".into(),
+                name: "Big".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action,
+                cooldown_ms: None,
+            }],
+            ..Config::default()
+        };
+        let result = validate_config(&config);
+        assert!(result.is_err());
+        let errors = result.unwrap_err();
+        assert!(errors.iter().any(|e| e.to_string().contains("sub-actions")));
     }
 }
