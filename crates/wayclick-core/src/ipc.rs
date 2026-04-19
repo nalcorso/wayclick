@@ -527,8 +527,6 @@ mod tests {
 
     #[test]
     fn test_concurrent_clients() {
-        use std::sync::atomic::AtomicBool;
-
         let logger = Arc::new(crate::logger::Logger::new(
             100,
             crate::logger::LogLevel::Trace,

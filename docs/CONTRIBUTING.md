@@ -3,11 +3,26 @@
 ## Development Setup
 
 ```sh
-git clone <repo>
+git clone https://github.com/nalcorso/wayclick.git
 cd wayclick
 ./scripts/dev.sh      # Sets up permissions and example config
+```
+
+### With mise (recommended)
+
+```sh
+mise install           # Install pinned Rust toolchain
+mise run build         # Build all crates
+mise run check         # Run fmt + clippy + test (full pre-commit check)
+```
+
+### Without mise
+
+```sh
 cargo build --workspace
 cargo test --workspace
+cargo clippy --workspace -- -D warnings
+cargo fmt --all -- --check
 ```
 
 ## Code Structure
@@ -18,10 +33,8 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for a full overview of the codebase.
 
 1. Fork the repository and create a feature branch.
 2. Make your changes.
-3. Ensure all tests pass: `cargo test --workspace`
-4. Ensure no warnings: `cargo build --workspace`
-5. Run clippy: `cargo clippy --workspace`
-6. Submit a pull request.
+3. Run all checks: `mise run check` (or the manual commands above).
+4. Submit a pull request.
 
 ## Testing
 

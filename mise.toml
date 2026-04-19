@@ -1,8 +1,6 @@
 # mise configuration for wayclick
 # https://mise.jdx.dev
-
-[tools]
-rust = "1.75"
+# Rust is expected to be installed via rustup or system package manager.
 
 [tasks.build]
 description = "Build all workspace crates"

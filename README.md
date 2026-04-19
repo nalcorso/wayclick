@@ -1,8 +1,7 @@
 # wayclick
 
-[![CI](https://github.com/nalcorso/wayclick/actions/workflows/ci.yml/badge.svg)](https://github.com/nalcorso/wayclick/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust: 1.75+](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
+[![Rust: 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 
 **Programmable mouse automation daemon for Linux.** Read physical button presses
 via evdev, execute configurable actions through uinput — Wayland-native, no X11
@@ -193,18 +192,17 @@ See [docs/HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) for more examples.
 
 ### Prerequisites
 
-- Rust 1.75+ (via [rustup](https://rustup.rs))
+- Rust 1.85+ (via [rustup](https://rustup.rs))
 - Linux with kernel support for uinput and evdev
 - `gcc` or `clang` (for vendored Lua build)
 
 ### With mise
 
 ```sh
-mise install        # Install pinned Rust toolchain
 mise run build      # Build all crates
 mise run test       # Run all tests
 mise run lint       # Clippy with strict warnings
-mise run check      # fmt + clippy + test
+mise run check      # fmt + clippy + test (full pre-commit check)
 mise run audit      # Security audit of dependencies
 ```
 
@@ -250,7 +248,7 @@ and threading model.
 - **Least privilege** — runs as your user, needs only `wayclick` + `input` groups
 - **Fuzz-tested** — config loading, IPC framing, and device matching are all
   fuzz targets
-- **Supply chain** — CI runs `cargo audit` and `cargo deny` on every push
+- **Supply chain** — `cargo audit` and `cargo deny` available via `mise run audit` / `mise run deny`
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model.
 
@@ -278,6 +276,13 @@ cd wayclick && ./scripts/dev.sh
 # Make changes, then:
 cargo test --workspace && cargo clippy --workspace -- -D warnings
 ```
+
+## AI Disclosure
+
+This project was developed with the assistance of AI coding agents (GitHub
+Copilot). All AI-generated code was reviewed, tested, and approved by the
+maintainer. The architecture, design decisions, and final implementation remain
+the responsibility of the human author.
 
 ## License
 

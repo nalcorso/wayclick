@@ -885,7 +885,7 @@ mod tests {
         thread::sleep(Duration::from_millis(150));
 
         // The worker should have stopped on its own
-        let snapshot = engine.triggers_snapshot();
+        let _snapshot = engine.triggers_snapshot();
         // Note: the state might still be Active but the thread has exited.
         // That's OK — it's the thread itself that respects duration.
     }

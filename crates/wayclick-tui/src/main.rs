@@ -324,15 +324,11 @@ fn handle_key(app: &mut App, key: KeyEvent) {
             app.should_quit = true;
         }
         KeyCode::Char('t') => app.toggle_enabled(),
-        KeyCode::Char('e') => {
-            if !app.enabled {
-                app.toggle_enabled();
-            }
+        KeyCode::Char('e') if !app.enabled => {
+            app.toggle_enabled();
         }
-        KeyCode::Char('d') => {
-            if app.enabled {
-                app.toggle_enabled();
-            }
+        KeyCode::Char('d') if app.enabled => {
+            app.toggle_enabled();
         }
         KeyCode::Char('r') => app.reload_config(),
         KeyCode::Enter | KeyCode::Char(' ') => app.fire_selected(),
