@@ -1,0 +1,54 @@
+# mise configuration for wayclick
+# https://mise.jdx.dev
+
+[tools]
+rust = "1.75"
+
+[tasks.build]
+description = "Build all workspace crates"
+run = "cargo build --workspace"
+
+[tasks.release]
+description = "Build release binaries"
+run = "cargo build --workspace --release"
+
+[tasks.test]
+description = "Run all tests"
+run = "cargo test --workspace"
+
+[tasks.lint]
+description = "Run clippy with strict warnings"
+run = "cargo clippy --workspace -- -D warnings"
+
+[tasks.fmt]
+description = "Format all code"
+run = "cargo fmt --all"
+
+[tasks.fmt-check]
+description = "Check formatting without modifying files"
+run = "cargo fmt --all -- --check"
+
+[tasks.audit]
+description = "Check dependencies for known vulnerabilities"
+run = "cargo audit"
+
+[tasks.deny]
+description = "Check dependency licenses and advisories"
+run = "cargo deny check"
+
+[tasks.check]
+description = "Run all CI checks (fmt, clippy, test, audit)"
+depends = ["fmt-check", "lint", "test"]
+
+[tasks.dev]
+description = "Quick development setup"
+run = "./scripts/dev.sh"
+
+[tasks.fuzz]
+description = "Run fuzz tests (requires nightly)"
+run = """
+cd fuzz
+cargo +nightly fuzz run fuzz_config_loader -- -max_total_time=60
+cargo +nightly fuzz run fuzz_ipc_frame -- -max_total_time=60
+cargo +nightly fuzz run fuzz_device_match -- -max_total_time=60
+"""

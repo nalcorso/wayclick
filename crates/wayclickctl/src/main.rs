@@ -82,31 +82,25 @@ fn main() {
         Command::Toggle => ipc_request(&socket_path, "toggle", None),
         Command::Enable => ipc_request(&socket_path, "enable", None),
         Command::Disable => ipc_request(&socket_path, "disable", None),
-        Command::Trigger { id } => {
-            ipc_request(
-                &socket_path,
-                "trigger",
-                Some(serde_json::json!({ "id": id, "press": true })),
-            )
-        }
+        Command::Trigger { id } => ipc_request(
+            &socket_path,
+            "trigger",
+            Some(serde_json::json!({ "id": id, "press": true })),
+        ),
         Command::List => ipc_request(&socket_path, "list_triggers", None),
         Command::Reload => ipc_request(&socket_path, "reload_config", None),
-        Command::Logs { tail } => {
-            ipc_request(
-                &socket_path,
-                "logs_tail",
-                Some(serde_json::json!({ "n": tail })),
-            )
-        }
+        Command::Logs { tail } => ipc_request(
+            &socket_path,
+            "logs_tail",
+            Some(serde_json::json!({ "n": tail })),
+        ),
         Command::Layer { action } => match action {
             LayerAction::Get => ipc_request(&socket_path, "get_layer", None),
-            LayerAction::Set { name } => {
-                ipc_request(
-                    &socket_path,
-                    "set_layer",
-                    Some(serde_json::json!({ "layer": name })),
-                )
-            }
+            LayerAction::Set { name } => ipc_request(
+                &socket_path,
+                "set_layer",
+                Some(serde_json::json!({ "layer": name })),
+            ),
         },
     };
 
@@ -147,7 +141,10 @@ fn main() {
                         }
                     }
                     println!("Backend:    {}", result["backend"].as_str().unwrap_or("?"));
-                    println!("Config:     {}", result["config_path"].as_str().unwrap_or("?"));
+                    println!(
+                        "Config:     {}",
+                        result["config_path"].as_str().unwrap_or("?")
+                    );
                     println!("Layer:      {}", result["layer"].as_str().unwrap_or("base"));
                     println!("Uptime:     {}s", result["uptime_secs"]);
                 }
@@ -217,4 +214,3 @@ fn main() {
         }
     }
 }
-

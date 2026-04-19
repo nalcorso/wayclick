@@ -89,9 +89,9 @@ impl MouseButton {
     /// Returns the Linux input event code for this button.
     pub fn event_code(&self) -> u16 {
         match self {
-            MouseButton::Left => 0x110,   // BTN_LEFT
-            MouseButton::Right => 0x111,  // BTN_RIGHT
-            MouseButton::Middle => 0x112, // BTN_MIDDLE
+            MouseButton::Left => 0x110,    // BTN_LEFT
+            MouseButton::Right => 0x111,   // BTN_RIGHT
+            MouseButton::Middle => 0x112,  // BTN_MIDDLE
             MouseButton::Button4 => 0x113, // BTN_SIDE
             MouseButton::Button5 => 0x114, // BTN_EXTRA
         }
@@ -278,7 +278,7 @@ pub struct ProfileRule {
     pub layer: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Config {
     pub options: GlobalOptions,
     pub triggers: Vec<TriggerBinding>,
@@ -286,16 +286,7 @@ pub struct Config {
     pub profile_rules: Vec<ProfileRule>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            options: GlobalOptions::default(),
-            triggers: Vec::new(),
-            device_bindings: Vec::new(),
-            profile_rules: Vec::new(),
-        }
-    }
-}
+// Config derives Default: all fields have sensible defaults (empty vecs, GlobalOptions::default()).
 
 /// Normalize a key name to a Linux input event code.
 /// Supports: "space" -> KEY_SPACE, "a" -> KEY_A, "KEY_SPACE" -> KEY_SPACE, "F1" -> KEY_F1
@@ -303,14 +294,15 @@ pub fn normalize_key_name(raw: &str) -> Result<(String, u32), ConfigError> {
     let upper = raw.to_uppercase();
     let key_name = if upper.starts_with("KEY_") {
         upper.clone()
-    } else if raw.len() == 1 && raw.chars().next().unwrap().is_ascii_alphabetic() {
-        format!("KEY_{}", upper)
     } else {
         format!("KEY_{}", upper)
     };
 
     let code = key_name_to_code(&key_name).ok_or_else(|| {
-        ConfigError::InvalidKey(format!("Unknown key: '{}' (resolved to '{}')", raw, key_name))
+        ConfigError::InvalidKey(format!(
+            "Unknown key: '{}' (resolved to '{}')",
+            raw, key_name
+        ))
     })?;
 
     Ok((key_name, code))
@@ -540,9 +532,11 @@ pub fn default_socket_path() -> PathBuf {
     if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
         PathBuf::from(runtime_dir).join("wayclick.sock")
     } else {
-        PathBuf::from("/tmp").join(format!("wayclick-{}.sock", unsafe {
-            libc::getuid()
-        }))
+        PathBuf::from("/tmp").join(format!(
+            "wayclick-{}.sock",
+            // SAFETY: getuid() is always safe — it reads the real UID with no side effects.
+            unsafe { libc::getuid() }
+        ))
     }
 }
 
@@ -568,27 +562,60 @@ mod tests {
 
     #[test]
     fn test_trigger_mode_from_str() {
-        assert_eq!(TriggerMode::from_str_mode("toggle").unwrap(), TriggerMode::Toggle);
-        assert_eq!(TriggerMode::from_str_mode("hold").unwrap(), TriggerMode::Hold);
-        assert_eq!(TriggerMode::from_str_mode("oneshot").unwrap(), TriggerMode::OneShot);
+        assert_eq!(
+            TriggerMode::from_str_mode("toggle").unwrap(),
+            TriggerMode::Toggle
+        );
+        assert_eq!(
+            TriggerMode::from_str_mode("hold").unwrap(),
+            TriggerMode::Hold
+        );
+        assert_eq!(
+            TriggerMode::from_str_mode("oneshot").unwrap(),
+            TriggerMode::OneShot
+        );
         assert!(TriggerMode::from_str_mode("invalid").is_err());
     }
 
     #[test]
     fn test_mouse_button_from_str() {
-        assert_eq!(MouseButton::from_str_name("left").unwrap(), MouseButton::Left);
-        assert_eq!(MouseButton::from_str_name("RIGHT").unwrap(), MouseButton::Right);
-        assert_eq!(MouseButton::from_str_name("middle").unwrap(), MouseButton::Middle);
-        assert_eq!(MouseButton::from_str_name("button4").unwrap(), MouseButton::Button4);
-        assert_eq!(MouseButton::from_str_name("button5").unwrap(), MouseButton::Button5);
+        assert_eq!(
+            MouseButton::from_str_name("left").unwrap(),
+            MouseButton::Left
+        );
+        assert_eq!(
+            MouseButton::from_str_name("RIGHT").unwrap(),
+            MouseButton::Right
+        );
+        assert_eq!(
+            MouseButton::from_str_name("middle").unwrap(),
+            MouseButton::Middle
+        );
+        assert_eq!(
+            MouseButton::from_str_name("button4").unwrap(),
+            MouseButton::Button4
+        );
+        assert_eq!(
+            MouseButton::from_str_name("button5").unwrap(),
+            MouseButton::Button5
+        );
         assert!(MouseButton::from_str_name("invalid").is_err());
     }
 
     #[test]
     fn test_scroll_direction_from_str() {
-        assert_eq!(ScrollDirection::from_str_name("up").unwrap(), ScrollDirection::Up);
-        assert_eq!(ScrollDirection::from_str_name("down").unwrap(), ScrollDirection::Down);
-        assert_eq!(ScrollDirection::from_str_name("LEFT").unwrap(), ScrollDirection::Left);
+        assert_eq!(
+            ScrollDirection::from_str_name("up").unwrap(),
+            ScrollDirection::Up
+        );
+        assert_eq!(
+            ScrollDirection::from_str_name("down").unwrap(),
+            ScrollDirection::Down
+        );
+        assert_eq!(
+            ScrollDirection::from_str_name("LEFT").unwrap(),
+            ScrollDirection::Left
+        );
         assert!(ScrollDirection::from_str_name("diagonal").is_err());
     }
 
@@ -662,7 +689,9 @@ mod tests {
             profile_rules: vec![],
         };
         let errs = validate_config(&config).unwrap_err();
-        assert!(errs.iter().any(|e| matches!(e, ConfigError::DuplicateTrigger(_))));
+        assert!(errs
+            .iter()
+            .any(|e| matches!(e, ConfigError::DuplicateTrigger(_))));
     }
 
     #[test]

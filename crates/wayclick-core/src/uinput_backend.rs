@@ -130,6 +130,8 @@ impl UinputBackend {
             code,
             value,
         };
+        // SAFETY: InputEvent is a plain C struct (#[repr(C)]) with no padding on Linux.
+        // The pointer and length are derived from a valid local reference.
         let bytes: &[u8] = unsafe {
             std::slice::from_raw_parts(
                 &event as *const InputEvent as *const u8,
@@ -161,8 +163,10 @@ impl InputBackend for UinputBackend {
 
         let fd = file.as_raw_fd();
 
+        // SAFETY: All ioctl calls operate on a valid fd obtained from File::as_raw_fd().
+        // The nix ioctl wrappers validate return codes. The UinputSetup and UinputAbsSetup
+        // structs are #[repr(C)] and match the kernel's expected layout.
         unsafe {
-            // Enable event types
             ui_set_evbit(fd, EV_KEY as _)
                 .map_err(|e| BackendError::Other(format!("UI_SET_EVBIT EV_KEY: {}", e)))?;
             ui_set_evbit(fd, EV_REL as _)
@@ -203,7 +207,7 @@ impl InputBackend for UinputBackend {
             let mut setup = UinputSetup {
                 id: InputId {
                     bustype: BUS_USB,
-                    vendor: 0x1d6b,  // Linux Foundation
+                    vendor: 0x1d6b, // Linux Foundation
                     product: 0x0001,
                     version: 1,
                 },
@@ -247,15 +251,15 @@ impl InputBackend for UinputBackend {
             ui_abs_setup(fd, &abs_y)
                 .map_err(|e| BackendError::Other(format!("UI_ABS_SETUP ABS_Y: {}", e)))?;
 
-            ui_dev_create(fd)
-                .map_err(|e| BackendError::Other(format!("UI_DEV_CREATE: {}", e)))?;
+            ui_dev_create(fd).map_err(|e| BackendError::Other(format!("UI_DEV_CREATE: {}", e)))?;
         }
 
         // Small delay to let the device register
         std::thread::sleep(std::time::Duration::from_millis(100));
 
         *self.file.lock().unwrap() = Some(file);
-        self.logger.info("UinputBackend initialized: wayclick-virtual-pointer");
+        self.logger
+            .info("UinputBackend initialized: wayclick-virtual-pointer");
         Ok(())
     }
 
@@ -335,6 +339,8 @@ impl Drop for UinputBackend {
     fn drop(&mut self) {
         let guard = self.file.lock().unwrap();
         if let Some(ref file) = *guard {
+            // SAFETY: fd is valid (checked above). UI_DEV_DESTROY is a simple ioctl that
+            // tears down the virtual device. Errors are intentionally ignored during drop.
             unsafe {
                 let _ = ui_dev_destroy(file.as_raw_fd());
             }

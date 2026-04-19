@@ -1,12 +1,19 @@
 [Unit]
-Description=Wayclick daemon (user session)
+Description=Wayclick daemon — mouse automation (user session)
+Documentation=https://github.com/nalcorso/wayclick
 After=default.target
 
 [Service]
-ExecStart=/usr/bin/wayclickd --enable
+ExecStart=%h/.cargo/bin/wayclickd --enable
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%t
+PrivateTmp=true
 
 [Install]
 WantedBy=default.target

@@ -104,8 +104,10 @@ impl Engine {
 
     /// Set the active layer.
     pub fn set_layer(&mut self, layer: String) {
-        self.logger
-            .info(format!("Layer changed: '{}' -> '{}'", self.current_layer, layer));
+        self.logger.info(format!(
+            "Layer changed: '{}' -> '{}'",
+            self.current_layer, layer
+        ));
         self.current_layer = layer;
     }
 
@@ -114,8 +116,10 @@ impl Engine {
             self.stop_all_workers();
         }
         self.enabled = enabled;
-        self.logger
-            .info(format!("Engine {}", if enabled { "enabled" } else { "disabled" }));
+        self.logger.info(format!(
+            "Engine {}",
+            if enabled { "enabled" } else { "disabled" }
+        ));
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -158,8 +162,7 @@ impl Engine {
             TriggerState::Active { .. } => {
                 // Stop worker
                 self.stop_worker(&trigger.id);
-                self.logger
-                    .info(format!("{}: stopped", trigger.id));
+                self.logger.info(format!("{}: stopped", trigger.id));
                 // Enter cooldown if configured
                 if let Some(cd) = trigger.cooldown_ms {
                     self.state.insert(
@@ -199,8 +202,7 @@ impl Engine {
         } else {
             // Release
             self.stop_worker(&trigger.id);
-            self.logger
-                .info(format!("{}: released", trigger.id));
+            self.logger.info(format!("{}: released", trigger.id));
             Ok(())
         }
     }
@@ -230,8 +232,7 @@ impl Engine {
         let logger = self.logger.clone();
         let trigger_id = trigger.id.clone();
 
-        self.logger
-            .info(format!("{}: started", trigger.id));
+        self.logger.info(format!("{}: started", trigger.id));
 
         let handle = thread::spawn(move || {
             if let Err(e) = execute_action_loop(&action, &backend, &logger, &stop_rx) {
@@ -291,10 +292,7 @@ impl Engine {
             .triggers
             .iter()
             .map(|t| {
-                let active = matches!(
-                    self.state.get(&t.id),
-                    Some(TriggerState::Active { .. })
-                );
+                let active = matches!(self.state.get(&t.id), Some(TriggerState::Active { .. }));
                 TriggerSnapshot {
                     id: t.id.clone(),
                     name: t.name.clone(),
@@ -333,93 +331,85 @@ fn execute_action_loop(
             duration_ms,
             jitter_ms,
             hold_ms,
-        } => {
-            loop {
-                if stop_rx.try_recv().is_ok() {
+        } => loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            do_click(backend, *button, *hold_ms)?;
+            let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
+            if !interruptible_sleep(sleep_ms, stop_rx) {
+                break;
+            }
+            if let Some(dur) = duration_ms {
+                if action_start.elapsed().as_millis() >= *dur as u128 {
                     break;
-                }
-                do_click(backend, *button, *hold_ms)?;
-                let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
-                if !interruptible_sleep(sleep_ms, stop_rx) {
-                    break;
-                }
-                if let Some(dur) = duration_ms {
-                    if action_start.elapsed().as_millis() >= *dur as u128 {
-                        break;
-                    }
                 }
             }
-        }
+        },
         ActionConfig::KeyPress {
             key_code,
             interval_ms,
             duration_ms,
             jitter_ms,
             ..
-        } => {
-            loop {
-                if stop_rx.try_recv().is_ok() {
+        } => loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            backend.key_press(*key_code)?;
+            backend.key_release(*key_code)?;
+            let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
+            if !interruptible_sleep(sleep_ms, stop_rx) {
+                break;
+            }
+            if let Some(dur) = duration_ms {
+                if action_start.elapsed().as_millis() >= *dur as u128 {
                     break;
-                }
-                backend.key_press(*key_code)?;
-                backend.key_release(*key_code)?;
-                let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
-                if !interruptible_sleep(sleep_ms, stop_rx) {
-                    break;
-                }
-                if let Some(dur) = duration_ms {
-                    if action_start.elapsed().as_millis() >= *dur as u128 {
-                        break;
-                    }
                 }
             }
-        }
+        },
         ActionConfig::ScrollWheel {
             direction,
             amount,
             interval_ms,
             duration_ms,
             jitter_ms,
-        } => {
-            loop {
-                if stop_rx.try_recv().is_ok() {
+        } => loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            backend.scroll(*direction, *amount)?;
+            let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
+            if !interruptible_sleep(sleep_ms, stop_rx) {
+                break;
+            }
+            if let Some(dur) = duration_ms {
+                if action_start.elapsed().as_millis() >= *dur as u128 {
                     break;
-                }
-                backend.scroll(*direction, *amount)?;
-                let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
-                if !interruptible_sleep(sleep_ms, stop_rx) {
-                    break;
-                }
-                if let Some(dur) = duration_ms {
-                    if action_start.elapsed().as_millis() >= *dur as u128 {
-                        break;
-                    }
                 }
             }
-        }
+        },
         ActionConfig::MouseMove {
             dx,
             dy,
             interval_ms,
             duration_ms,
             jitter_ms,
-        } => {
-            loop {
-                if stop_rx.try_recv().is_ok() {
+        } => loop {
+            if stop_rx.try_recv().is_ok() {
+                break;
+            }
+            backend.move_relative(*dx, *dy)?;
+            let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
+            if !interruptible_sleep(sleep_ms, stop_rx) {
+                break;
+            }
+            if let Some(dur) = duration_ms {
+                if action_start.elapsed().as_millis() >= *dur as u128 {
                     break;
-                }
-                backend.move_relative(*dx, *dy)?;
-                let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
-                if !interruptible_sleep(sleep_ms, stop_rx) {
-                    break;
-                }
-                if let Some(dur) = duration_ms {
-                    if action_start.elapsed().as_millis() >= *dur as u128 {
-                        break;
-                    }
                 }
             }
-        }
+        },
         ActionConfig::Composite {
             mode: CompositeMode::Parallel,
             actions,
@@ -716,12 +706,7 @@ mod tests {
             device_bindings: vec![],
             profile_rules: vec![],
         };
-        let engine = Engine::new(
-            config,
-            Arc::new(backend),
-            logger,
-            "test".into(),
-        );
+        let engine = Engine::new(config, Arc::new(backend), logger, "test".into());
         (engine, calls)
     }
 
@@ -744,9 +729,8 @@ mod tests {
 
     #[test]
     fn test_toggle_starts_worker() {
-        let (mut engine, calls) = test_engine(vec![
-            auto_click_trigger("test", 5, TriggerMode::Toggle),
-        ]);
+        let (mut engine, calls) =
+            test_engine(vec![auto_click_trigger("test", 5, TriggerMode::Toggle)]);
         engine.set_enabled(true);
         engine.trigger_event("test", true).unwrap();
 
@@ -759,9 +743,8 @@ mod tests {
 
     #[test]
     fn test_toggle_stops_worker() {
-        let (mut engine, calls) = test_engine(vec![
-            auto_click_trigger("test", 5, TriggerMode::Toggle),
-        ]);
+        let (mut engine, calls) =
+            test_engine(vec![auto_click_trigger("test", 5, TriggerMode::Toggle)]);
         engine.set_enabled(true);
 
         // Start
@@ -780,9 +763,8 @@ mod tests {
 
     #[test]
     fn test_hold_press_release() {
-        let (mut engine, calls) = test_engine(vec![
-            auto_click_trigger("test", 5, TriggerMode::Hold),
-        ]);
+        let (mut engine, calls) =
+            test_engine(vec![auto_click_trigger("test", 5, TriggerMode::Hold)]);
         engine.set_enabled(true);
 
         // Press
@@ -826,9 +808,7 @@ mod tests {
 
     #[test]
     fn test_disabled_engine_ignores_trigger() {
-        let (mut engine, _) = test_engine(vec![
-            auto_click_trigger("test", 5, TriggerMode::Toggle),
-        ]);
+        let (mut engine, _) = test_engine(vec![auto_click_trigger("test", 5, TriggerMode::Toggle)]);
         // Engine is disabled by default
         let result = engine.trigger_event("test", true);
         assert!(matches!(result, Err(EngineError::Disabled)));
@@ -857,9 +837,8 @@ mod tests {
 
     #[test]
     fn test_apply_config_stops_running_workers() {
-        let (mut engine, calls) = test_engine(vec![
-            auto_click_trigger("test", 5, TriggerMode::Toggle),
-        ]);
+        let (mut engine, calls) =
+            test_engine(vec![auto_click_trigger("test", 5, TriggerMode::Toggle)]);
         engine.set_enabled(true);
         engine.trigger_event("test", true).unwrap();
         thread::sleep(Duration::from_millis(30));
@@ -934,9 +913,7 @@ mod tests {
 
     #[test]
     fn test_triggers_snapshot() {
-        let (engine, _) = test_engine(vec![
-            auto_click_trigger("t1", 50, TriggerMode::Toggle),
-        ]);
+        let (engine, _) = test_engine(vec![auto_click_trigger("t1", 50, TriggerMode::Toggle)]);
         let snaps = engine.triggers_snapshot();
         assert_eq!(snaps.len(), 1);
         assert_eq!(snaps[0].id, "t1");
@@ -1008,9 +985,7 @@ mod tests {
 
     #[test]
     fn test_layer_preserved_across_config_reload() {
-        let (mut engine, _) = test_engine(vec![
-            auto_click_trigger("t1", 50, TriggerMode::Toggle),
-        ]);
+        let (mut engine, _) = test_engine(vec![auto_click_trigger("t1", 50, TriggerMode::Toggle)]);
         engine.set_layer("combat".to_string());
         assert_eq!(engine.current_layer(), "combat");
 

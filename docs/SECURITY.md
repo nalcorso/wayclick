@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # Security Model
 
 ## Threat Model

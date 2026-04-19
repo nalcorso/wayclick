@@ -97,6 +97,8 @@ impl EvdevSource {
         let mut grabbed = false;
         if exclusive {
             let fd = file.as_raw_fd();
+            // SAFETY: fd is a valid file descriptor from File::as_raw_fd().
+            // EVIOCGRAB with arg=1 acquires exclusive access to the device.
             match unsafe { eviocgrab(fd, 1) } {
                 Ok(_) => grabbed = true,
                 Err(e) => {
@@ -132,6 +134,8 @@ impl InputSource for EvdevSource {
         };
         let timeout_ms = timeout.as_millis() as i32;
 
+        // SAFETY: pollfd is properly initialized with a valid fd and POLLIN event mask.
+        // poll(2) is safe to call with a single pollfd and bounded timeout.
         let ret = unsafe { libc::poll(&mut pollfd, 1, timeout_ms) };
 
         if ret < 0 {
@@ -192,6 +196,7 @@ impl InputSource for EvdevSource {
     fn close(self) {
         if self.grabbed {
             let fd = self.file.as_raw_fd();
+            // SAFETY: fd is valid. EVIOCGRAB with arg=0 releases the exclusive grab.
             unsafe {
                 let _ = eviocgrab(fd, 0);
             }
@@ -206,9 +211,14 @@ fn read_device_info(path: &Path, file: &File) -> Result<DeviceInfo, SourceError>
 
     // Read device name
     let mut name_buf = [0u8; 256];
+    // SAFETY: fd is a valid file descriptor. eviocgname writes into a fixed-size
+    // stack buffer; the nul-terminated result is safely converted to a String.
     let name = match unsafe { eviocgname(fd, &mut name_buf) } {
         Ok(_) => {
-            let nul = name_buf.iter().position(|&b| b == 0).unwrap_or(name_buf.len());
+            let nul = name_buf
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(name_buf.len());
             String::from_utf8_lossy(&name_buf[..nul]).to_string()
         }
         Err(_) => "Unknown".to_string(),
@@ -216,6 +226,8 @@ fn read_device_info(path: &Path, file: &File) -> Result<DeviceInfo, SourceError>
 
     // Read device ID
     let mut id = [0u16; 4];
+    // SAFETY: fd is valid. eviocgid writes a 4-element u16 array matching
+    // the kernel's input_id struct layout: [bustype, vendor, product, version].
     let (vendor_id, product_id) = match unsafe { eviocgid(fd, &mut id) } {
         Ok(_) => (id[1], id[2]), // [bustype, vendor, product, version]
         Err(_) => (0, 0),
@@ -223,9 +235,14 @@ fn read_device_info(path: &Path, file: &File) -> Result<DeviceInfo, SourceError>
 
     // Read physical location
     let mut phys_buf = [0u8; 256];
+    // SAFETY: fd is valid. eviocgphys writes the device's physical location
+    // string into a fixed-size stack buffer; nul-terminated, safely converted.
     let phys = match unsafe { eviocgphys(fd, &mut phys_buf) } {
         Ok(_) => {
-            let nul = phys_buf.iter().position(|&b| b == 0).unwrap_or(phys_buf.len());
+            let nul = phys_buf
+                .iter()
+                .position(|&b| b == 0)
+                .unwrap_or(phys_buf.len());
             String::from_utf8_lossy(&phys_buf[..nul]).to_string()
         }
         Err(_) => String::new(),
@@ -281,4 +298,3 @@ pub fn enumerate_devices() -> Vec<DeviceInfo> {
 mod libc {
     pub use ::libc::*;
 }
-

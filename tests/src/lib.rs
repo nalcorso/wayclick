@@ -40,8 +40,7 @@ mod integration {
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("test.sock");
 
-        let server =
-            IpcServer::new(socket_path.clone(), engine.clone(), logger.clone()).unwrap();
+        let server = IpcServer::new(socket_path.clone(), engine.clone(), logger.clone()).unwrap();
         let shutdown = server.shutdown_flag();
 
         let handle = thread::spawn(move || {

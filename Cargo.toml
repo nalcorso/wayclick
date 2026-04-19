@@ -13,7 +13,9 @@ resolver = "2"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/yourusername/wayclick"
+repository = "https://github.com/nalcorso/wayclick"
+homepage = "https://github.com/nalcorso/wayclick"
+rust-version = "1.75.0"
 
 [workspace.dependencies]
 wayclick-core = { path = "crates/wayclick-core" }

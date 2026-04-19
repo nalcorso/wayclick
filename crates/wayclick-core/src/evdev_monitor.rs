@@ -103,8 +103,10 @@ impl EvdevMonitor {
 
     fn scan_devices(&mut self) {
         let devices = evdev_source::enumerate_devices();
-        self.logger
-            .info(format!("EvdevMonitor: found {} input devices", devices.len()));
+        self.logger.info(format!(
+            "EvdevMonitor: found {} input devices",
+            devices.len()
+        ));
 
         for dev in &devices {
             for binding in &self.config_bindings {

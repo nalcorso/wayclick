@@ -86,10 +86,7 @@ fn make_error(id: Option<&Value>, code: i32, message: &str) -> Value {
 /// Handle a single JSON-RPC request.
 pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc<Logger>) -> Value {
     let id = request.get("id");
-    let method = request
-        .get("method")
-        .and_then(|m| m.as_str())
-        .unwrap_or("");
+    let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let params = request.get("params");
 
     match method {
@@ -271,10 +268,7 @@ impl IpcServer {
         };
 
         loop {
-            if self
-                .shutdown
-                .load(std::sync::atomic::Ordering::Relaxed)
-            {
+            if self.shutdown.load(std::sync::atomic::Ordering::Relaxed) {
                 break;
             }
 
@@ -312,9 +306,7 @@ impl Drop for IpcServer {
 }
 
 fn handle_client(mut stream: UnixStream, engine: Arc<Mutex<Engine>>, logger: Arc<Logger>) {
-    stream
-        .set_nonblocking(false)
-        .unwrap_or_default();
+    stream.set_nonblocking(false).unwrap_or_default();
     stream
         .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap_or_default();
@@ -338,7 +330,11 @@ fn handle_client(mut stream: UnixStream, engine: Arc<Mutex<Engine>>, logger: Arc
 }
 
 /// Client-side helper: connect to daemon and send a single request, return response.
-pub fn ipc_request(socket_path: &Path, method: &str, params: Option<Value>) -> Result<Value, IpcError> {
+pub fn ipc_request(
+    socket_path: &Path,
+    method: &str,
+    params: Option<Value>,
+) -> Result<Value, IpcError> {
     let mut stream = UnixStream::connect(socket_path)?;
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
@@ -388,11 +384,20 @@ mod tests {
 
     #[test]
     fn test_handle_request_ping() {
-        let logger = Arc::new(crate::logger::Logger::new(100, crate::logger::LogLevel::Trace, false));
+        let logger = Arc::new(crate::logger::Logger::new(
+            100,
+            crate::logger::LogLevel::Trace,
+            false,
+        ));
         logger.set_quiet(true);
         let config = crate::config::Config::default();
         let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(config, backend, logger.clone(), "test".into())));
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            backend,
+            logger.clone(),
+            "test".into(),
+        )));
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
         let response = handle_request(&request, &engine, &logger);
@@ -401,11 +406,20 @@ mod tests {
 
     #[test]
     fn test_handle_request_status() {
-        let logger = Arc::new(crate::logger::Logger::new(100, crate::logger::LogLevel::Trace, false));
+        let logger = Arc::new(crate::logger::Logger::new(
+            100,
+            crate::logger::LogLevel::Trace,
+            false,
+        ));
         logger.set_quiet(true);
         let config = crate::config::Config::default();
         let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(config, backend, logger.clone(), "test".into())));
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            backend,
+            logger.clone(),
+            "test".into(),
+        )));
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "status"});
         let response = handle_request(&request, &engine, &logger);
@@ -415,11 +429,20 @@ mod tests {
 
     #[test]
     fn test_handle_request_unknown_method() {
-        let logger = Arc::new(crate::logger::Logger::new(100, crate::logger::LogLevel::Trace, false));
+        let logger = Arc::new(crate::logger::Logger::new(
+            100,
+            crate::logger::LogLevel::Trace,
+            false,
+        ));
         logger.set_quiet(true);
         let config = crate::config::Config::default();
         let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(config, backend, logger.clone(), "test".into())));
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            backend,
+            logger.clone(),
+            "test".into(),
+        )));
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "nonexistent"});
         let response = handle_request(&request, &engine, &logger);
@@ -428,25 +451,44 @@ mod tests {
 
     #[test]
     fn test_handle_request_trigger_unknown_id() {
-        let logger = Arc::new(crate::logger::Logger::new(100, crate::logger::LogLevel::Trace, false));
+        let logger = Arc::new(crate::logger::Logger::new(
+            100,
+            crate::logger::LogLevel::Trace,
+            false,
+        ));
         logger.set_quiet(true);
         let config = crate::config::Config::default();
         let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(config, backend, logger.clone(), "test".into())));
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            backend,
+            logger.clone(),
+            "test".into(),
+        )));
         engine.lock().unwrap().set_enabled(true);
 
-        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "trigger", "params": {"id": "nope"}});
+        let request =
+            json!({"jsonrpc": "2.0", "id": 1, "method": "trigger", "params": {"id": "nope"}});
         let response = handle_request(&request, &engine, &logger);
         assert!(response.get("error").is_some());
     }
 
     #[test]
     fn test_handle_request_toggle() {
-        let logger = Arc::new(crate::logger::Logger::new(100, crate::logger::LogLevel::Trace, false));
+        let logger = Arc::new(crate::logger::Logger::new(
+            100,
+            crate::logger::LogLevel::Trace,
+            false,
+        ));
         logger.set_quiet(true);
         let config = crate::config::Config::default();
         let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(config, backend, logger.clone(), "test".into())));
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            backend,
+            logger.clone(),
+            "test".into(),
+        )));
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "toggle"});
         let response = handle_request(&request, &engine, &logger);
@@ -458,16 +500,26 @@ mod tests {
 
     #[test]
     fn test_handle_request_logs_tail() {
-        let logger = Arc::new(crate::logger::Logger::new(100, crate::logger::LogLevel::Trace, false));
+        let logger = Arc::new(crate::logger::Logger::new(
+            100,
+            crate::logger::LogLevel::Trace,
+            false,
+        ));
         logger.set_quiet(true);
         logger.info("test message 1");
         logger.info("test message 2");
 
         let config = crate::config::Config::default();
         let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(config, backend, logger.clone(), "test".into())));
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            backend,
+            logger.clone(),
+            "test".into(),
+        )));
 
-        let request = json!({"jsonrpc": "2.0", "id": 1, "method": "logs_tail", "params": {"n": 10}});
+        let request =
+            json!({"jsonrpc": "2.0", "id": 1, "method": "logs_tail", "params": {"n": 10}});
         let response = handle_request(&request, &engine, &logger);
         let logs = response["result"].as_array().unwrap();
         assert!(logs.len() >= 2);
@@ -477,11 +529,20 @@ mod tests {
     fn test_concurrent_clients() {
         use std::sync::atomic::AtomicBool;
 
-        let logger = Arc::new(crate::logger::Logger::new(100, crate::logger::LogLevel::Trace, false));
+        let logger = Arc::new(crate::logger::Logger::new(
+            100,
+            crate::logger::LogLevel::Trace,
+            false,
+        ));
         logger.set_quiet(true);
         let config = crate::config::Config::default();
         let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(config, backend, logger.clone(), "test".into())));
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            backend,
+            logger.clone(),
+            "test".into(),
+        )));
 
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("test.sock");

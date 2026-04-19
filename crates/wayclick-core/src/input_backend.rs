@@ -39,13 +39,13 @@ impl LoggingBackend {
 
 impl InputBackend for LoggingBackend {
     fn init(&mut self) -> Result<(), BackendError> {
-        self.logger.info("LoggingBackend initialized (dry-run mode)");
+        self.logger
+            .info("LoggingBackend initialized (dry-run mode)");
         Ok(())
     }
 
     fn click(&self, button: MouseButton) -> Result<(), BackendError> {
-        self.logger
-            .debug(format!("DRY RUN click {:?}", button));
+        self.logger.debug(format!("DRY RUN click {:?}", button));
         Ok(())
     }
 
@@ -111,6 +111,12 @@ pub enum BackendCall {
 
 pub struct MockBackend {
     pub calls: Arc<Mutex<Vec<BackendCall>>>,
+}
+
+impl Default for MockBackend {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockBackend {

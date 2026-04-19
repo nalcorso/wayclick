@@ -1,7 +1,10 @@
 [package]
 name = "wayclick-core"
+description = "Core library for wayclick: config, engine, Lua API, IPC, and input backends"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 mlua = { workspace = true }

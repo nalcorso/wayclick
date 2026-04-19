@@ -15,7 +15,10 @@ use wayclick_core::lua_api::load_config;
 use wayclick_core::uinput_backend::UinputBackend;
 
 #[derive(Parser)]
-#[command(name = "wayclickd", about = "Wayclick programmable mouse automation daemon")]
+#[command(
+    name = "wayclickd",
+    about = "Wayclick programmable mouse automation daemon"
+)]
 #[command(version)]
 struct Cli {
     /// Path to init.lua config file
@@ -118,27 +121,26 @@ fn main() {
     let socket_path = effective_socket_path(&config);
 
     // Create backend: UinputBackend for real mode, LoggingBackend for dry-run
-    let backend: Arc<dyn wayclick_core::input_backend::InputBackend> =
-        if config.options.dry_run {
-            logger.info("Starting in dry-run mode (LoggingBackend)");
-            Arc::new(LoggingBackend::new(logger.clone()))
-        } else {
-            let mut uinput = UinputBackend::new(logger.clone());
-            match uinput.init() {
-                Ok(()) => {
-                    logger.info("UinputBackend initialized successfully");
-                    Arc::new(uinput)
-                }
-                Err(e) => {
-                    logger.warn(format!(
-                        "Failed to init UinputBackend: {}. Falling back to dry-run mode.",
-                        e
-                    ));
-                    config.options.dry_run = true;
-                    Arc::new(LoggingBackend::new(logger.clone()))
-                }
+    let backend: Arc<dyn wayclick_core::input_backend::InputBackend> = if config.options.dry_run {
+        logger.info("Starting in dry-run mode (LoggingBackend)");
+        Arc::new(LoggingBackend::new(logger.clone()))
+    } else {
+        let mut uinput = UinputBackend::new(logger.clone());
+        match uinput.init() {
+            Ok(()) => {
+                logger.info("UinputBackend initialized successfully");
+                Arc::new(uinput)
             }
-        };
+            Err(e) => {
+                logger.warn(format!(
+                    "Failed to init UinputBackend: {}. Falling back to dry-run mode.",
+                    e
+                ));
+                config.options.dry_run = true;
+                Arc::new(LoggingBackend::new(logger.clone()))
+            }
+        }
+    };
 
     // Create engine
     let engine = Arc::new(Mutex::new(Engine::new(
@@ -283,7 +285,6 @@ fn check_permissions(config_path: &str) {
     // Check /dev/uinput
     let _uinput_ok = std::fs::metadata("/dev/uinput")
         .map(|_m| {
-            
             // Check if writable by checking mode
             true
         })
@@ -303,11 +304,7 @@ fn check_permissions(config_path: &str) {
         .map(|entries| {
             entries
                 .filter_map(|e| e.ok())
-                .filter(|e| {
-                    e.file_name()
-                        .to_string_lossy()
-                        .starts_with("event")
-                })
+                .filter(|e| e.file_name().to_string_lossy().starts_with("event"))
                 .any(|e| std::fs::File::open(e.path()).is_ok())
         })
         .unwrap_or(false);
@@ -320,30 +317,18 @@ fn check_permissions(config_path: &str) {
     // Check config
     let config = PathBuf::from(config_path);
     if config.exists() {
-        println!(
-            "Lua config           ✓ found at {}",
-            config.display()
-        );
+        println!("Lua config           ✓ found at {}", config.display());
     } else {
-        println!(
-            "Lua config           ✗ not found at {}",
-            config.display()
-        );
+        println!("Lua config           ✗ not found at {}", config.display());
     }
 
     // Check IPC socket dir
     if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
         let p = PathBuf::from(&runtime_dir);
         if p.exists() {
-            println!(
-                "IPC socket dir       ✓ {} writable",
-                runtime_dir
-            );
+            println!("IPC socket dir       ✓ {} writable", runtime_dir);
         } else {
-            println!(
-                "IPC socket dir       ✗ {} does not exist",
-                runtime_dir
-            );
+            println!("IPC socket dir       ✗ {} does not exist", runtime_dir);
         }
     } else {
         println!("IPC socket dir       ✗ XDG_RUNTIME_DIR not set");
@@ -351,4 +336,3 @@ fn check_permissions(config_path: &str) {
 
     println!("────────────────────────────────");
 }
-

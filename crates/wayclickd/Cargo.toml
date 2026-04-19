@@ -1,7 +1,10 @@
 [package]
 name = "wayclickd"
+description = "Wayclick daemon — Lua-configurable mouse automation for Linux"
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 wayclick-core = { workspace = true }

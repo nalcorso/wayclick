@@ -51,7 +51,7 @@ fn cmd_list() {
         std::process::exit(1);
     }
 
-    println!("{:<30} {:<10} {:<40} {}", "PATH", "VID:PID", "NAME", "PHYS");
+    println!("{:<30} {:<10} {:<40} PHYS", "PATH", "VID:PID", "NAME");
     println!("{}", "-".repeat(100));
 
     for dev in &devices {
@@ -137,9 +137,8 @@ fn cmd_identify(timeout: u64) {
     let mut sources: Vec<EvdevSource> = Vec::new();
 
     for dev in &devices {
-        match EvdevSource::open(&dev.path, false) {
-            Ok(s) => sources.push(s),
-            Err(_) => {}
+        if let Ok(s) = EvdevSource::open(&dev.path, false) {
+            sources.push(s);
         }
     }
 
@@ -147,37 +146,31 @@ fn cmd_identify(timeout: u64) {
 
     while std::time::Instant::now() < deadline {
         for source in &mut sources {
-            match source.poll_events(Duration::from_millis(10)) {
-                Ok(events) => {
-                    for ev in &events {
-                        if ev.event_type == 0x01 && ev.value == 1 {
-                            let info = source.device_info();
-                            println!("=== DEVICE IDENTIFIED ===");
-                            println!("  Path:    {}", info.path.display());
-                            println!("  Name:    {}", info.name);
-                            println!("  VID:PID: {:04x}:{:04x}", info.vendor_id, info.product_id);
-                            println!("  Phys:    {}", info.phys);
-                            println!("  Button:  code={}", ev.code);
-                            println!();
-                            println!("Lua device match examples:");
-                            println!(
-                                "  wayclick.device {{ name_contains = \"{}\" }}",
-                                info.name
-                            );
-                            println!(
-                                "  wayclick.device {{ vid = 0x{:04x}, pid = 0x{:04x} }}",
-                                info.vendor_id, info.product_id
-                            );
+            if let Ok(events) = source.poll_events(Duration::from_millis(10)) {
+                for ev in &events {
+                    if ev.event_type == 0x01 && ev.value == 1 {
+                        let info = source.device_info();
+                        println!("=== DEVICE IDENTIFIED ===");
+                        println!("  Path:    {}", info.path.display());
+                        println!("  Name:    {}", info.name);
+                        println!("  VID:PID: {:04x}:{:04x}", info.vendor_id, info.product_id);
+                        println!("  Phys:    {}", info.phys);
+                        println!("  Button:  code={}", ev.code);
+                        println!();
+                        println!("Lua device match examples:");
+                        println!("  wayclick.device {{ name_contains = \"{}\" }}", info.name);
+                        println!(
+                            "  wayclick.device {{ vid = 0x{:04x}, pid = 0x{:04x} }}",
+                            info.vendor_id, info.product_id
+                        );
 
-                            // Clean up
-                            for s in sources {
-                                s.close();
-                            }
-                            return;
+                        // Clean up
+                        for s in sources {
+                            s.close();
                         }
+                        return;
                     }
                 }
-                Err(_) => {}
             }
         }
     }

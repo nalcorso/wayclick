@@ -173,10 +173,8 @@ impl App {
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("unknown")
                                     .to_string();
-                                let active = t
-                                    .get("active")
-                                    .and_then(|v| v.as_bool())
-                                    .unwrap_or(false);
+                                let active =
+                                    t.get("active").and_then(|v| v.as_bool()).unwrap_or(false);
                                 Some(TriggerInfo {
                                     id,
                                     mode,
@@ -338,14 +336,16 @@ fn handle_key(app: &mut App, key: KeyEvent) {
         }
         KeyCode::Char('r') => app.reload_config(),
         KeyCode::Enter | KeyCode::Char(' ') => app.fire_selected(),
-        KeyCode::Down | KeyCode::Char('j') => match app.active_pane {
-            Pane::Triggers => app.next_trigger(),
-            _ => {}
-        },
-        KeyCode::Up | KeyCode::Char('k') => match app.active_pane {
-            Pane::Triggers => app.prev_trigger(),
-            _ => {}
-        },
+        KeyCode::Down | KeyCode::Char('j') => {
+            if let Pane::Triggers = app.active_pane {
+                app.next_trigger();
+            }
+        }
+        KeyCode::Up | KeyCode::Char('k') => {
+            if let Pane::Triggers = app.active_pane {
+                app.prev_trigger();
+            }
+        }
         KeyCode::Tab => {
             app.active_pane = match app.active_pane {
                 Pane::Triggers => Pane::Devices,
@@ -368,7 +368,7 @@ fn ui(f: &mut ratatui::Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1), // Header
-            Constraint::Min(10),  // Body
+            Constraint::Min(10),   // Body
             Constraint::Length(1), // Footer
         ])
         .split(size);
@@ -409,9 +409,17 @@ fn render_header(f: &mut ratatui::Frame, app: &App, area: Rect) {
     let mode = if app.dry_run { " dry-run" } else { "" };
 
     let header = Line::from(vec![
-        Span::styled(" wayclick ", Style::default().fg(BLUE).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " wayclick ",
+            Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+        ),
         Span::styled("── [", Style::default().fg(SURFACE1)),
-        Span::styled(status, Style::default().fg(status_color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            status,
+            Style::default()
+                .fg(status_color)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled("]", Style::default().fg(SURFACE1)),
         Span::styled(mode, Style::default().fg(YELLOW)),
         Span::styled(
@@ -449,14 +457,8 @@ fn render_triggers(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
                     format!(" {} ", indicator),
                     Style::default().fg(if t.active { GREEN } else { SURFACE1 }),
                 ),
-                Span::styled(
-                    format!("{:<16}", t.id),
-                    Style::default().fg(TEXT),
-                ),
-                Span::styled(
-                    format!("{:<10}", state),
-                    Style::default().fg(state_color),
-                ),
+                Span::styled(format!("{:<16}", t.id), Style::default().fg(TEXT)),
+                Span::styled(format!("{:<10}", state), Style::default().fg(state_color)),
                 Span::styled(&t.mode, Style::default().fg(MAUVE)),
             ]))
         })
@@ -469,14 +471,12 @@ fn render_triggers(f: &mut ratatui::Frame, app: &mut App, area: Rect) {
         .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(BASE));
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_style(
-            Style::default()
-                .bg(SURFACE1)
-                .fg(TEXT)
-                .add_modifier(Modifier::BOLD),
-        );
+    let list = List::new(items).block(block).highlight_style(
+        Style::default()
+            .bg(SURFACE1)
+            .fg(TEXT)
+            .add_modifier(Modifier::BOLD),
+    );
 
     f.render_stateful_widget(list, area, &mut app.trigger_list_state);
 }
@@ -534,18 +534,11 @@ fn render_devices(f: &mut ratatui::Frame, app: &App, area: Rect) {
         .map(|d| {
             let indicator = if d.connected { "✓" } else { "✗" };
             let color = if d.connected { GREEN } else { RED };
-            let display_name = if d.name.is_empty() {
-                &d.path
-            } else {
-                &d.name
-            };
+            let display_name = if d.name.is_empty() { &d.path } else { &d.name };
 
             ListItem::new(Line::from(vec![
                 Span::styled(format!(" {} ", indicator), Style::default().fg(color)),
-                Span::styled(
-                    format!("{:<24}", d.path),
-                    Style::default().fg(TEXT),
-                ),
+                Span::styled(format!("{:<24}", d.path), Style::default().fg(TEXT)),
                 Span::styled(display_name, Style::default().fg(SUBTEXT0)),
             ]))
         })
@@ -590,7 +583,10 @@ fn render_logs(f: &mut ratatui::Frame, app: &App, area: Rect) {
             } else {
                 TEXT
             };
-            Line::from(Span::styled(format!("  {}", log), Style::default().fg(color)))
+            Line::from(Span::styled(
+                format!("  {}", log),
+                Style::default().fg(color),
+            ))
         })
         .collect();
 
@@ -618,9 +614,15 @@ fn render_footer(f: &mut ratatui::Frame, app: &App, area: Rect) {
             Span::styled(":disable  ", Style::default().fg(SUBTEXT0)),
             Span::styled("↑↓", Style::default().fg(BLUE).add_modifier(Modifier::BOLD)),
             Span::styled(":select  ", Style::default().fg(SUBTEXT0)),
-            Span::styled("enter", Style::default().fg(BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "enter",
+                Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":fire  ", Style::default().fg(SUBTEXT0)),
-            Span::styled("tab", Style::default().fg(BLUE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "tab",
+                Style::default().fg(BLUE).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(":switch pane", Style::default().fg(SUBTEXT0)),
         ])
     };

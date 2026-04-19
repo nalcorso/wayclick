@@ -164,7 +164,9 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
     // wayclick.auto_click(table) -> action table
     let auto_click = lua
         .create_function(|lua, table: LuaTable| {
-            let button_str: String = table.get::<String>("button").unwrap_or_else(|_| "left".into());
+            let button_str: String = table
+                .get::<String>("button")
+                .unwrap_or_else(|_| "left".into());
             let _button = MouseButton::from_str_name(&button_str)
                 .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
             let interval_ms: u32 = table.get("interval_ms").unwrap_or(50);
@@ -194,8 +196,8 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             let key: String = table
                 .get::<String>("key")
                 .map_err(|_| LuaError::RuntimeError("key_press requires 'key' field".into()))?;
-            let (key_name, key_code) = normalize_key_name(&key)
-                .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+            let (key_name, key_code) =
+                normalize_key_name(&key).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
             let interval_ms: u32 = table.get("interval_ms").unwrap_or(1000);
             let duration_ms: Option<u32> = table.get("duration_ms").ok();
             let jitter_ms: u32 = table.get("jitter_ms").unwrap_or(0);
@@ -432,7 +434,10 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 format!("KEY_{}", key_upper)
             };
             let code = key_name_to_code(&full_name).ok_or_else(|| {
-                LuaError::RuntimeError(format!("Unknown media key: '{}' (tried '{}')", key, full_name))
+                LuaError::RuntimeError(format!(
+                    "Unknown media key: '{}' (tried '{}')",
+                    key, full_name
+                ))
             })?;
             let action = lua.create_table()?;
             action.set("_type", "key_press")?;
@@ -511,9 +516,9 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
     // wayclick.register_trigger(table)
     let register_trigger = lua
         .create_function(|lua, table: LuaTable| {
-            let id: String = table
-                .get::<String>("id")
-                .map_err(|_| LuaError::RuntimeError("register_trigger requires 'id' field".into()))?;
+            let id: String = table.get::<String>("id").map_err(|_| {
+                LuaError::RuntimeError("register_trigger requires 'id' field".into())
+            })?;
             let name: String = table.get("name").unwrap_or_else(|_| id.clone());
             let description: String = table.get("description").unwrap_or_default();
             let mode_str: String = table.get("mode").unwrap_or_else(|_| "toggle".into());
@@ -521,9 +526,9 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
             let cooldown_ms: Option<u32> = table.get("cooldown_ms").ok();
 
-            let action_table: LuaTable = table
-                .get::<LuaTable>("action")
-                .map_err(|_| LuaError::RuntimeError("register_trigger requires 'action' field".into()))?;
+            let action_table: LuaTable = table.get::<LuaTable>("action").map_err(|_| {
+                LuaError::RuntimeError("register_trigger requires 'action' field".into())
+            })?;
 
             let action = parse_action_table(&action_table)?;
 
@@ -933,10 +938,7 @@ mod tests {
             let config = load_config(&path, &test_logger()).unwrap();
             match &config.triggers[0].action {
                 ActionConfig::AutoClick { button, .. } => {
-                    assert_eq!(
-                        *button,
-                        MouseButton::from_str_name(btn).unwrap()
-                    );
+                    assert_eq!(*button, MouseButton::from_str_name(btn).unwrap());
                 }
                 _ => panic!("Expected AutoClick"),
             }
@@ -1385,10 +1387,16 @@ mod tests {
         );
         let config = load_config(&path, &test_logger()).unwrap();
         match &config.triggers[0].action {
-            ActionConfig::Composite { mode: CompositeMode::Sequence, actions } => {
+            ActionConfig::Composite {
+                mode: CompositeMode::Sequence,
+                actions,
+            } => {
                 assert_eq!(actions.len(), 3);
                 assert!(matches!(actions[0], ActionConfig::AutoClick { .. }));
-                assert!(matches!(actions[1], ActionConfig::Delay { duration_ms: 500 }));
+                assert!(matches!(
+                    actions[1],
+                    ActionConfig::Delay { duration_ms: 500 }
+                ));
                 assert!(matches!(actions[2], ActionConfig::AutoClick { .. }));
             }
             _ => panic!("Expected Sequence"),
@@ -1484,7 +1492,10 @@ mod tests {
         let config = load_config(&path, &test_logger()).unwrap();
         match &config.triggers[0].action {
             ActionConfig::ClickAt {
-                x, y, button, hold_ms,
+                x,
+                y,
+                button,
+                hold_ms,
             } => {
                 assert_eq!(*x, 500);
                 assert_eq!(*y, 300);
@@ -1511,7 +1522,9 @@ mod tests {
         );
         let config = load_config(&path, &test_logger()).unwrap();
         match &config.triggers[0].action {
-            ActionConfig::ClickAt { button, hold_ms, .. } => {
+            ActionConfig::ClickAt {
+                button, hold_ms, ..
+            } => {
                 assert_eq!(*button, MouseButton::Left);
                 assert_eq!(*hold_ms, 0);
             }
@@ -1541,7 +1554,12 @@ mod tests {
         let config = load_config(&path, &test_logger()).unwrap();
         match &config.triggers[0].action {
             ActionConfig::Drag {
-                from_x, from_y, to_x, to_y, button, duration_ms,
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                button,
+                duration_ms,
             } => {
                 assert_eq!(*from_x, 100);
                 assert_eq!(*from_y, 200);
@@ -1593,7 +1611,9 @@ mod tests {
         );
         let config = load_config(&path, &test_logger()).unwrap();
         match &config.triggers[0].action {
-            ActionConfig::KeyPress { key_code, key_name, .. } => {
+            ActionConfig::KeyPress {
+                key_code, key_name, ..
+            } => {
                 assert_eq!(*key_code, 164); // KEY_PLAYPAUSE
                 assert_eq!(key_name, "KEY_PLAY_PAUSE");
             }
@@ -1769,7 +1789,10 @@ mod tests {
         let config = load_config(&path, &test_logger()).unwrap();
         assert_eq!(config.profile_rules.len(), 1);
         assert_eq!(config.profile_rules[0].name, "gaming");
-        assert_eq!(config.profile_rules[0].match_app, Some("steam_app_.*".to_string()));
+        assert_eq!(
+            config.profile_rules[0].match_app,
+            Some("steam_app_.*".to_string())
+        );
         assert_eq!(config.profile_rules[0].layer, "combat");
     }
 
@@ -1798,21 +1821,31 @@ mod tests {
         );
         assert_eq!(
             ActionConfig::ClickAt {
-                x: 0, y: 0, button: MouseButton::Left, hold_ms: 0
+                x: 0,
+                y: 0,
+                button: MouseButton::Left,
+                hold_ms: 0
             }
             .type_name(),
             "click_at"
         );
         assert_eq!(
             ActionConfig::Drag {
-                from_x: 0, from_y: 0, to_x: 0, to_y: 0,
-                button: MouseButton::Left, duration_ms: 100
+                from_x: 0,
+                from_y: 0,
+                to_x: 0,
+                to_y: 0,
+                button: MouseButton::Left,
+                duration_ms: 100
             }
             .type_name(),
             "drag"
         );
         assert_eq!(
-            ActionConfig::SetLayer { layer: "test".into() }.type_name(),
+            ActionConfig::SetLayer {
+                layer: "test".into()
+            }
+            .type_name(),
             "set_layer"
         );
     }
@@ -1820,12 +1853,31 @@ mod tests {
     #[test]
     fn test_is_oneshot_only() {
         assert!(ActionConfig::SetLayer { layer: "x".into() }.is_oneshot_only());
-        assert!(ActionConfig::ClickAt { x: 0, y: 0, button: MouseButton::Left, hold_ms: 0 }.is_oneshot_only());
-        assert!(ActionConfig::Drag { from_x: 0, from_y: 0, to_x: 1, to_y: 1, button: MouseButton::Left, duration_ms: 100 }.is_oneshot_only());
+        assert!(ActionConfig::ClickAt {
+            x: 0,
+            y: 0,
+            button: MouseButton::Left,
+            hold_ms: 0
+        }
+        .is_oneshot_only());
+        assert!(ActionConfig::Drag {
+            from_x: 0,
+            from_y: 0,
+            to_x: 1,
+            to_y: 1,
+            button: MouseButton::Left,
+            duration_ms: 100
+        }
+        .is_oneshot_only());
         assert!(ActionConfig::MouseMoveAbsolute { x: 0, y: 0 }.is_oneshot_only());
         assert!(!ActionConfig::NoOp.is_oneshot_only());
         assert!(!ActionConfig::AutoClick {
-            button: MouseButton::Left, interval_ms: 50, duration_ms: None, jitter_ms: 0, hold_ms: 0
-        }.is_oneshot_only());
+            button: MouseButton::Left,
+            interval_ms: 50,
+            duration_ms: None,
+            jitter_ms: 0,
+            hold_ms: 0
+        }
+        .is_oneshot_only());
     }
 }
