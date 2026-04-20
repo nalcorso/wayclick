@@ -279,6 +279,29 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
         .set("auto_click", auto_click)
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
 
+    // wayclick.click(table) -> action table (single click at current cursor position)
+    let click = lua
+        .create_function(|lua, table: LuaTable| {
+            let button_str: String = table
+                .get::<String>("button")
+                .unwrap_or_else(|_| "left".into());
+            let _button = MouseButton::from_str_name(&button_str)
+                .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+            let hold_ms: u32 = table.get("hold_ms").unwrap_or(0);
+
+            let action = lua.create_table()?;
+            action.set("_type", "auto_click")?;
+            action.set("_button", button_str)?;
+            action.set("_interval_ms", 1u32)?;
+            action.set("_jitter_ms", 0u32)?;
+            action.set("_hold_ms", hold_ms)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("click", click)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
     // wayclick.key_press(table) -> action table
     let key_press = lua
         .create_function(|lua, table: LuaTable| {
@@ -1056,6 +1079,68 @@ mod tests {
                 assert_eq!(*jitter_ms, 0);
             }
             _ => panic!("Expected AutoClick"),
+        }
+    }
+
+    #[test]
+    fn test_click_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.click({ button = "right", hold_ms = 5 }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::AutoClick {
+                button,
+                interval_ms,
+                duration_ms,
+                hold_ms,
+                ..
+            } => {
+                assert_eq!(*button, MouseButton::Right);
+                assert_eq!(*interval_ms, 1);
+                assert_eq!(*duration_ms, None);
+                assert_eq!(*hold_ms, 5);
+            }
+            _ => panic!("Expected AutoClick from click()"),
+        }
+    }
+
+    #[test]
+    fn test_click_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.click({}),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::AutoClick {
+                button,
+                interval_ms,
+                duration_ms,
+                hold_ms,
+                ..
+            } => {
+                assert_eq!(*button, MouseButton::Left);
+                assert_eq!(*interval_ms, 1);
+                assert_eq!(*duration_ms, None);
+                assert_eq!(*hold_ms, 0);
+            }
+            _ => panic!("Expected AutoClick from click()"),
         }
     }
 

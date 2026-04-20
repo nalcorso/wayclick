@@ -34,6 +34,22 @@ wayclick.register_trigger({
 })
 ```
 
+### click
+
+Performs a single click at the current cursor position. Useful for remapping
+scroll wheel or other inputs to a single mouse click.
+
+```lua
+wayclick.register_trigger({
+    id = "left_click",
+    mode = "oneshot",
+    action = wayclick.click({
+        button = "left",      -- left | right | middle | button4 | button5
+        hold_ms = 0,          -- Milliseconds to hold button down (0 = instant)
+    }),
+})
+```
+
 ### key_press
 
 Presses and releases a single keyboard key.
