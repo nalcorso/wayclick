@@ -46,10 +46,7 @@ void main() {
     let vertex = DEFAULT_VERTEX_SHADER;
 
     match load_material(
-        ShaderSource::Glsl {
-            vertex,
-            fragment,
-        },
+        ShaderSource::Glsl { vertex, fragment },
         MaterialParams {
             uniforms: vec![
                 UniformDesc::new("u_time", UniformType::Float1),
@@ -97,10 +94,7 @@ void main() {
     let vertex = DEFAULT_VERTEX_SHADER;
 
     match load_material(
-        ShaderSource::Glsl {
-            vertex,
-            fragment,
-        },
+        ShaderSource::Glsl { vertex, fragment },
         MaterialParams::default(),
     ) {
         Ok(mat) => Some(mat),

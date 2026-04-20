@@ -1842,7 +1842,10 @@ mod tests {
         let config = load_config(&path, &test_logger()).unwrap();
         match &config.triggers[0].action {
             ActionConfig::ClickAt {
-                button, hold_ms, settle_ms, ..
+                button,
+                hold_ms,
+                settle_ms,
+                ..
             } => {
                 assert_eq!(*button, MouseButton::Left);
                 assert_eq!(*hold_ms, 0);
@@ -2455,7 +2458,10 @@ mod tests {
             "#,
         );
         let result = load_config(&path, &test_logger());
-        assert!(result.is_err(), "Should error when scroll binding without exclusive");
+        assert!(
+            result.is_err(),
+            "Should error when scroll binding without exclusive"
+        );
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("exclusive"),

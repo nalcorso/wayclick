@@ -63,11 +63,11 @@ pub fn draw_hud(
 
     let items = [
         (format!("FPS: {fps}"), fps_color),
-        (format!("Clicks/s: {:.1}", perf.click_rate), colors::LEFT_CLICK),
         (
-            format!("Total: {}", perf.total_clicks()),
-            colors::TEXT,
+            format!("Clicks/s: {:.1}", perf.click_rate),
+            colors::LEFT_CLICK,
         ),
+        (format!("Total: {}", perf.total_clicks()), colors::TEXT),
         (
             format!("Events/s: {:.0}", perf.event_rate),
             colors::TEXT_DIM,
@@ -97,14 +97,7 @@ fn format_duration(secs: f64) -> String {
 
 // ─── Event log (right panel) ──────────────────────────────────────────────
 
-pub fn draw_event_log(
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    events: &EventRing,
-    font: &Font,
-) {
+pub fn draw_event_log(x: f32, y: f32, w: f32, h: f32, events: &EventRing, font: &Font) {
     draw_rectangle(x, y, w, h, colors::LOG_BG);
 
     let sz: u16 = 13;
@@ -231,8 +224,12 @@ pub fn draw_status_bar(
     // Totals
     let totals = format!(
         "L:{} R:{} M:{} X:{} Scroll:{} Keys:{}",
-        perf.left_total, perf.right_total, perf.middle_total,
-        perf.extra_total, perf.scroll_total, perf.key_total
+        perf.left_total,
+        perf.right_total,
+        perf.middle_total,
+        perf.extra_total,
+        perf.scroll_total,
+        perf.key_total
     );
     draw_text_ex(
         &totals,

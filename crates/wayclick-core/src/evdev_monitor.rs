@@ -2,7 +2,10 @@
 
 use crate::config::DeviceBinding;
 use crate::engine::Engine;
-use crate::evdev_source::{self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, SYN_DROPPED, SYN_REPORT};
+use crate::evdev_source::{
+    self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, SYN_DROPPED,
+    SYN_REPORT,
+};
 use crate::input_backend::InputBackend;
 use crate::logger::Logger;
 use std::collections::{HashMap, HashSet};
@@ -274,8 +277,7 @@ impl DeviceProcessor {
                             self.pending_frame.clear();
                         }
                         SYN_DROPPED => {
-                            self.logger
-                                .warn("SYN_DROPPED: discarding partial frame");
+                            self.logger.warn("SYN_DROPPED: discarding partial frame");
                             self.pending_frame.clear();
                         }
                         _ => {}
@@ -329,12 +331,7 @@ impl DeviceProcessor {
                 match event.value {
                     1 => {
                         // Press: try to claim via dispatch
-                        if try_claim_button(
-                            event.code,
-                            &self.binding,
-                            &self.engine,
-                            &self.logger,
-                        ) {
+                        if try_claim_button(event.code, &self.binding, &self.engine, &self.logger) {
                             self.claimed_codes.insert(event.code);
                             suppress_indices.insert(i);
                         }
@@ -651,7 +648,11 @@ mod tests {
 
     // --- Phase 1: Key release handling tests ---
 
-    fn make_hold_engine() -> (Arc<Mutex<Engine>>, Arc<Mutex<Vec<crate::input_backend::BackendCall>>>, Arc<Logger>) {
+    fn make_hold_engine() -> (
+        Arc<Mutex<Engine>>,
+        Arc<Mutex<Vec<crate::input_backend::BackendCall>>>,
+        Arc<Logger>,
+    ) {
         let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
         logger.set_quiet(true);
         let backend = MockBackend::new();
@@ -831,8 +832,8 @@ mod tests {
 
     // --- Phase 2: Frame-based event forwarding tests ---
 
+    use crate::evdev_source::{EV_REL, EV_SYN, SYN_DROPPED, SYN_REPORT};
     use crate::input_backend::BackendCall;
-    use crate::evdev_source::{EV_SYN, SYN_REPORT, SYN_DROPPED, EV_REL};
 
     const BTN_EXTRA: u16 = 0x114;
     const BTN_LEFT: u16 = 0x110;
@@ -841,7 +842,11 @@ mod tests {
 
     fn make_oneshot_engine(
         trigger_id: &str,
-    ) -> (Arc<Mutex<Engine>>, Arc<Mutex<Vec<BackendCall>>>, Arc<Logger>) {
+    ) -> (
+        Arc<Mutex<Engine>>,
+        Arc<Mutex<Vec<BackendCall>>>,
+        Arc<Logger>,
+    ) {
         let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
         logger.set_quiet(true);
         let backend = MockBackend::new();
@@ -914,16 +919,15 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // BTN_LEFT is not in our bindings — should be forwarded
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_LEFT, value: 1 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_LEFT,
+                value: 1,
+            },
             syn_report(),
         ]);
 
@@ -943,16 +947,19 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_X, value: 5 },
-            InputEvent { event_type: EV_REL, code: REL_Y, value: -3 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_X,
+                value: 5,
+            },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_Y,
+                value: -3,
+            },
             syn_report(),
         ]);
 
@@ -972,16 +979,15 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // BTN_EXTRA is matched — should NOT be forwarded
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 1,
+            },
             syn_report(),
         ]);
 
@@ -1001,22 +1007,25 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // Press in frame 1 — claimed
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 1,
+            },
             syn_report(),
         ]);
 
         // Release in frame 2 — should also be suppressed (cross-frame claim)
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 0,
+            },
             syn_report(),
         ]);
 
@@ -1035,23 +1044,30 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // Two frames in one batch
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_X, value: 1 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_X,
+                value: 1,
+            },
             syn_report(),
-            InputEvent { event_type: EV_REL, code: REL_X, value: 2 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_X,
+                value: 2,
+            },
             syn_report(),
         ]);
 
         let calls = fwd_calls.lock().unwrap();
-        assert_eq!(calls.len(), 2, "Should produce two separate forwarded frames");
+        assert_eq!(
+            calls.len(),
+            2,
+            "Should produce two separate forwarded frames"
+        );
     }
 
     #[test]
@@ -1077,8 +1093,16 @@ mod tests {
         let mut proc = make_processor(binding, engine, logger, None);
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_X, value: 5 },
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_X,
+                value: 5,
+            },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 1,
+            },
         ]);
 
         // No forward_frame calls possible — no backend
@@ -1092,31 +1116,35 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // First poll: partial frame (no SYN_REPORT yet)
-        proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_X, value: 10 },
-        ]);
+        proc.process_events(&[InputEvent {
+            event_type: EV_REL,
+            code: REL_X,
+            value: 10,
+        }]);
 
         // Nothing forwarded yet
         assert!(fwd_calls.lock().unwrap().is_empty());
 
         // Second poll: rest of frame + SYN_REPORT
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_Y, value: -5 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_Y,
+                value: -5,
+            },
             syn_report(),
         ]);
 
         let calls = fwd_calls.lock().unwrap();
         assert_eq!(calls.len(), 1, "Frame should be forwarded after SYN_REPORT");
         if let BackendCall::ForwardFrame(ref events) = calls[0] {
-            assert_eq!(events, &vec![(EV_REL, REL_X, 10i32), (EV_REL, REL_Y, -5i32)]);
+            assert_eq!(
+                events,
+                &vec![(EV_REL, REL_X, 10i32), (EV_REL, REL_Y, -5i32)]
+            );
         }
     }
 
@@ -1127,22 +1155,25 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // Poll 1: press frame
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 1,
+            },
             syn_report(),
         ]);
 
         // Poll 2: release frame (different poll batch)
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 0,
+            },
             syn_report(),
         ]);
 
@@ -1189,15 +1220,14 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 1,
+            },
             syn_report(),
         ]);
 
@@ -1216,23 +1246,30 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // Partial frame, then SYN_DROPPED, then a valid frame
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_X, value: 999 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_X,
+                value: 999,
+            },
             syn_dropped(),
-            InputEvent { event_type: EV_REL, code: REL_X, value: 1 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_X,
+                value: 1,
+            },
             syn_report(),
         ]);
 
         let calls = fwd_calls.lock().unwrap();
-        assert_eq!(calls.len(), 1, "Should only forward the valid frame after SYN_DROPPED");
+        assert_eq!(
+            calls.len(),
+            1,
+            "Should only forward the valid frame after SYN_DROPPED"
+        );
         if let BackendCall::ForwardFrame(ref events) = calls[0] {
             assert_eq!(events, &vec![(EV_REL, REL_X, 1i32)]);
         }
@@ -1240,7 +1277,10 @@ mod tests {
 
     // --- Phase 4: Scroll Trigger Dispatch Tests ---
 
-    fn scroll_binding_for(direction: crate::config::ScrollDirection, trigger_id: &str) -> DeviceBinding {
+    fn scroll_binding_for(
+        direction: crate::config::ScrollDirection,
+        trigger_id: &str,
+    ) -> DeviceBinding {
         DeviceBinding {
             device_match: DeviceMatch::ByName {
                 contains: "test".into(),
@@ -1262,21 +1302,24 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL, value: 1 },
+            InputEvent {
+                event_type: EV_REL,
+                code: evdev_source::REL_WHEEL,
+                value: 1,
+            },
             syn_report(),
         ]);
 
         // Scroll event was claimed (suppressed) — proves trigger was fired
         let calls = fwd_calls.lock().unwrap();
-        assert!(calls.is_empty(), "Matched scroll up should be suppressed, got {:?}", *calls);
+        assert!(
+            calls.is_empty(),
+            "Matched scroll up should be suppressed, got {:?}",
+            *calls
+        );
     }
 
     #[test]
@@ -1308,15 +1351,14 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL, value: 3 },
+            InputEvent {
+                event_type: EV_REL,
+                code: evdev_source::REL_WHEEL,
+                value: 3,
+            },
             syn_report(),
         ]);
 
@@ -1334,20 +1376,23 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL, value: -1 },
+            InputEvent {
+                event_type: EV_REL,
+                code: evdev_source::REL_WHEEL,
+                value: -1,
+            },
             syn_report(),
         ]);
 
         let calls = fwd_calls.lock().unwrap();
-        assert!(calls.is_empty(), "Matched scroll down should be suppressed, got {:?}", *calls);
+        assert!(
+            calls.is_empty(),
+            "Matched scroll down should be suppressed, got {:?}",
+            *calls
+        );
     }
 
     #[test]
@@ -1357,17 +1402,20 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // Frame with both REL_WHEEL and REL_WHEEL_HI_RES
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL, value: 1 },
-            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL_HI_RES, value: 120 },
+            InputEvent {
+                event_type: EV_REL,
+                code: evdev_source::REL_WHEEL,
+                value: 1,
+            },
+            InputEvent {
+                event_type: EV_REL,
+                code: evdev_source::REL_WHEEL_HI_RES,
+                value: 120,
+            },
             syn_report(),
         ]);
 
@@ -1388,17 +1436,20 @@ mod tests {
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
 
-        let mut proc = make_processor(
-            binding,
-            engine,
-            logger,
-            Some(Arc::new(fwd_backend)),
-        );
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         // Send scroll DOWN (not matched)
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL, value: -1 },
-            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL_HI_RES, value: -120 },
+            InputEvent {
+                event_type: EV_REL,
+                code: evdev_source::REL_WHEEL,
+                value: -1,
+            },
+            InputEvent {
+                event_type: EV_REL,
+                code: evdev_source::REL_WHEEL_HI_RES,
+                value: -120,
+            },
             syn_report(),
         ]);
 

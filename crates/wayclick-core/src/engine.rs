@@ -812,7 +812,10 @@ mod tests {
         thread::sleep(Duration::from_millis(30));
 
         let count_before_release = calls.lock().unwrap().len();
-        assert!(count_before_release > 0, "Toggle should start clicking on press");
+        assert!(
+            count_before_release > 0,
+            "Toggle should start clicking on press"
+        );
 
         // Button up → should NOT stop (toggle stays active until next press)
         engine.trigger_event("test", false).unwrap();

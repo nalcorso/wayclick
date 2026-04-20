@@ -22,14 +22,12 @@ fn window_conf() -> Conf {
 
 #[macroquad::main(window_conf)]
 async fn main() {
-    let font = load_ttf_font_from_bytes(include_bytes!(
-        "../assets/fonts/JetBrainsMono-Regular.ttf"
-    ))
-    .expect("failed to load font");
-    let font_bold = load_ttf_font_from_bytes(include_bytes!(
-        "../assets/fonts/JetBrainsMono-Bold.ttf"
-    ))
-    .expect("failed to load bold font");
+    let font =
+        load_ttf_font_from_bytes(include_bytes!("../assets/fonts/JetBrainsMono-Regular.ttf"))
+            .expect("failed to load font");
+    let font_bold =
+        load_ttf_font_from_bytes(include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf"))
+            .expect("failed to load bold font");
 
     let bg_material = ui::shaders::create_bg_material();
     let bloom_material = ui::shaders::create_bloom_material();
@@ -52,14 +50,24 @@ async fn main() {
         let sh = screen_height();
 
         // Resize bloom target if window size changed
-        let (tw, th) = (bloom_target.texture.width() as u32, bloom_target.texture.height() as u32);
+        let (tw, th) = (
+            bloom_target.texture.width() as u32,
+            bloom_target.texture.height() as u32,
+        );
         if tw != sw as u32 || th != sh as u32 {
             bloom_target = render_target(sw as u32, sh as u32);
             bloom_target.texture.set_filter(FilterMode::Linear);
         }
 
         // --- Input polling ---
-        events::poll_input(&mut events, &mut perf, &mut particles, mx, my, &mut prev_mouse);
+        events::poll_input(
+            &mut events,
+            &mut perf,
+            &mut particles,
+            mx,
+            my,
+            &mut prev_mouse,
+        );
         perf.tick(dt);
 
         // --- Particle update ---
@@ -128,17 +136,19 @@ async fn main() {
 
         // --- UI Panels ---
         ui::draw_hud(sw, hud_h, &perf, now - start_time, &font, &font_bold);
-        ui::draw_event_log(
-            sw - log_width, hud_h, log_width, canvas_h,
-            &events, &font,
-        );
-        ui::draw_status_bar(
-            sw, sh, status_h, mx, my, &perf, &font,
-        );
+        ui::draw_event_log(sw - log_width, hud_h, log_width, canvas_h, &events, &font);
+        ui::draw_status_bar(sw, sh, status_h, mx, my, &perf, &font);
 
         // Panel separator lines
         draw_line(0.0, hud_h, sw, hud_h, 1.0, colors::GRID);
-        draw_line(sw - log_width, hud_h, sw - log_width, sh - status_h, 1.0, colors::GRID);
+        draw_line(
+            sw - log_width,
+            hud_h,
+            sw - log_width,
+            sh - status_h,
+            1.0,
+            colors::GRID,
+        );
         draw_line(0.0, sh - status_h, sw, sh - status_h, 1.0, colors::GRID);
 
         next_frame().await;

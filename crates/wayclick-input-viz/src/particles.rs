@@ -1,5 +1,5 @@
-use macroquad::prelude::*;
 use crate::colors;
+use macroquad::prelude::*;
 
 const MAX_PARTICLES: usize = 4000;
 

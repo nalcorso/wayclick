@@ -9,11 +9,17 @@ use crate::perf::PerfCounters;
 pub enum InputEvent {
     Click(MouseButton),
     Release(MouseButton),
-    Scroll { x: f32, y: f32 },
+    Scroll {
+        x: f32,
+        y: f32,
+    },
     KeyDown(KeyCode),
     KeyUp(KeyCode),
     #[allow(dead_code)]
-    Move { x: f32, y: f32 },
+    Move {
+        x: f32,
+        y: f32,
+    },
 }
 
 #[derive(Clone, Debug)]
