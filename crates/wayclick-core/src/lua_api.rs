@@ -693,8 +693,28 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 .map_err(|_| LuaError::RuntimeError("bind_device requires 'bindings' field".into()))?;
 
             let mut button_bindings = Vec::new();
+            let mut scroll_bindings = Vec::new();
             for pair in bindings_table.sequence_values::<LuaTable>() {
                 let binding = pair?;
+
+                // Check for scroll binding first
+                if let Ok(scroll_dir_str) = binding.get::<String>("scroll") {
+                    let trigger_id: String = binding.get("trigger")?;
+                    let layer: Option<String> = binding.get("layer").ok();
+                    let direction = ScrollDirection::from_str_name(&scroll_dir_str).map_err(|e| {
+                        LuaError::RuntimeError(format!(
+                            "Invalid scroll direction '{}': {}",
+                            scroll_dir_str, e
+                        ))
+                    })?;
+                    scroll_bindings.push(ScrollBinding {
+                        direction,
+                        trigger_id,
+                        layer,
+                    });
+                    continue;
+                }
+
                 let code_str: String = binding.get("code")?;
                 let trigger_id: String = binding.get("trigger")?;
                 let hold_trigger_id: Option<String> = binding.get("hold_trigger").ok();
@@ -738,11 +758,18 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 });
             }
 
+            // Validate: scroll bindings require exclusive mode
+            if !scroll_bindings.is_empty() && !exclusive {
+                return Err(LuaError::RuntimeError(
+                    "bind_device: scroll bindings require exclusive=true".into(),
+                ));
+            }
+
             let mut builder = lua.app_data_mut::<ConfigBuilder>().unwrap();
             builder.device_bindings.push(DeviceBinding {
                 device_match,
                 button_bindings,
-                scroll_bindings: vec![],
+                scroll_bindings,
                 exclusive,
             });
 
@@ -2257,5 +2284,122 @@ mod tests {
         assert!(result.is_ok());
         let config = result.unwrap();
         assert_eq!(config.triggers.len(), 100);
+    }
+
+    #[test]
+    fn test_lua_scroll_binding_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "left_click",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "Test Mouse",
+                exclusive = true,
+                bindings = {
+                    { scroll = "up", trigger = "left_click" },
+                },
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let config = result.unwrap();
+        assert_eq!(config.device_bindings.len(), 1);
+        assert_eq!(config.device_bindings[0].scroll_bindings.len(), 1);
+        assert_eq!(
+            config.device_bindings[0].scroll_bindings[0].direction,
+            ScrollDirection::Up
+        );
+    }
+
+    #[test]
+    fn test_lua_mixed_scroll_and_button_bindings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "left_click",
+                action = wayclick.noop(),
+            })
+            wayclick.register_trigger({
+                id = "auto_clicker",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "Test Mouse",
+                exclusive = true,
+                bindings = {
+                    { scroll = "up", trigger = "left_click" },
+                    { scroll = "down", trigger = "left_click" },
+                    { code = "BTN_EXTRA", trigger = "auto_clicker" },
+                },
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_ok(), "Failed: {:?}", result.err());
+        let config = result.unwrap();
+        assert_eq!(config.device_bindings[0].scroll_bindings.len(), 2);
+        assert_eq!(config.device_bindings[0].button_bindings.len(), 1);
+    }
+
+    #[test]
+    fn test_lua_scroll_without_exclusive_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "left_click",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "Test Mouse",
+                bindings = {
+                    { scroll = "up", trigger = "left_click" },
+                },
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err(), "Should error when scroll binding without exclusive");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("exclusive"),
+            "Error should mention exclusive: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_lua_invalid_scroll_direction_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "left_click",
+                action = wayclick.noop(),
+            })
+            wayclick.bind_device({
+                name = "Test Mouse",
+                exclusive = true,
+                bindings = {
+                    { scroll = "diagonal", trigger = "left_click" },
+                },
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err(), "Should error for invalid scroll direction");
     }
 }
