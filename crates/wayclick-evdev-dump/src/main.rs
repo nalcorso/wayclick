@@ -158,9 +158,9 @@ fn cmd_identify(timeout: u64) {
                         println!("  Button:  code={}", ev.code);
                         println!();
                         println!("Lua device match examples:");
-                        println!("  wayclick.device {{ name_contains = \"{}\" }}", info.name);
+                        println!("  wayclick.bind_device({{ name = \"{}\" }})", info.name);
                         println!(
-                            "  wayclick.device {{ vid = 0x{:04x}, pid = 0x{:04x} }}",
+                            "  wayclick.bind_device({{ vid = 0x{:04x}, pid = 0x{:04x} }})",
                             info.vendor_id, info.product_id
                         );
 

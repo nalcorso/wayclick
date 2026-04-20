@@ -11,7 +11,6 @@ cd wayclick
 ### With mise (recommended)
 
 ```sh
-mise install           # Install pinned Rust toolchain
 mise run build         # Build all crates
 mise run check         # Run fmt + clippy + test (full pre-commit check)
 ```

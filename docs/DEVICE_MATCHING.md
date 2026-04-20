@@ -22,8 +22,8 @@ wayclick-evdev-dump identify
   Button:  code=272
 
 Lua device match examples:
-  wayclick.device { name_contains = "Logitech G Pro Gaming Mouse" }
-  wayclick.device { vid = 0x046d, pid = 0xc08b }
+  wayclick.bind_device({ name = "Logitech G Pro Gaming Mouse" })
+  wayclick.bind_device({ vid = 0x046d, pid = 0xc08b })
 ```
 
 ## Listing All Devices
@@ -40,52 +40,53 @@ IDs, and physical locations.
 ### By Name (substring, case-insensitive)
 
 ```lua
-wayclick.device {
-    name_contains = "G Pro",
+wayclick.bind_device({
+    name = "G Pro",
     bindings = { ... }
-}
+})
 ```
 
 ### By Vendor/Product ID
 
 ```lua
-wayclick.device {
+wayclick.bind_device({
     vid = 0x046d,
     pid = 0xc08b,
     bindings = { ... }
-}
+})
 ```
 
 ### By Physical Location
 
 ```lua
-wayclick.device {
-    phys_contains = "usb-0000:00:14.0",
+wayclick.bind_device({
+    phys = "usb-0000:00:14.0",
     bindings = { ... }
-}
+})
 ```
 
 ### By Device Path
 
 ```lua
-wayclick.device {
+wayclick.bind_device({
     path = "/dev/input/event5",
     bindings = { ... }
-}
+})
 ```
 
 > **Note:** Device paths can change across reboots. Prefer name or VID:PID matching.
 
-### Multiple Matchers (match any)
+### Multiple Matchers
+
+When multiple match criteria are specified, wayclick matches if **any** of them
+match:
 
 ```lua
-wayclick.device {
-    any = {
-        { name_contains = "G Pro" },
-        { vid = 0x046d, pid = 0xc08b },
-    },
+wayclick.bind_device({
+    name = "G Pro",
+    vid = 0x046d, pid = 0xc08b,
     bindings = { ... }
-}
+})
 ```
 
 ## Exclusive Mode
@@ -95,11 +96,11 @@ When `exclusive = true`, wayclick grabs the device exclusively using
 device.
 
 ```lua
-wayclick.device {
-    name_contains = "G Pro",
+wayclick.bind_device({
+    name = "G Pro",
     exclusive = true,
     bindings = { ... }
-}
+})
 ```
 
 ## Button Bindings
@@ -107,13 +108,13 @@ wayclick.device {
 Each device binding maps physical button codes to trigger IDs:
 
 ```lua
-wayclick.device {
-    name_contains = "G Pro",
+wayclick.bind_device({
+    name = "G Pro",
     bindings = {
         { code = "BTN_SIDE",  trigger = "rapid_fire" },
         { code = "BTN_EXTRA", trigger = "burst_fire" },
     }
-}
+})
 ```
 
 ### Common Button Codes

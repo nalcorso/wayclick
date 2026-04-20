@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- Rust 1.75+ (via [rustup](https://rustup.rs))
+- Rust 1.85.0+ (via [rustup](https://rustup.rs))
 - Linux with kernel support for uinput and evdev
 - `gcc` or `clang` (for Lua vendored build)
 

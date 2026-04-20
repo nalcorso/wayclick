@@ -5,12 +5,12 @@ Wayclick is configured with Lua scripts. The entry point is `init.lua`.
 ## Global Options
 
 ```lua
-wayclick.set_global {
-    dry_run = false,       -- Log actions instead of emitting real input events
-    socket_path = nil,     -- Override IPC socket path (default: XDG_RUNTIME_DIR/wayclick.sock)
-    log_level = "info",    -- Minimum log level: trace, debug, info, warn, error
-    cooldown_ms = 50,      -- Default cooldown after a trigger deactivates (ms)
-}
+wayclick.set_options({
+    dry_run = false,           -- Log actions instead of emitting real input events
+    socket_path = nil,         -- Override IPC socket path (default: XDG_RUNTIME_DIR/wayclick.sock)
+    log_capacity = 512,        -- Maximum number of log entries in the ring buffer
+    min_interval_ms = 1,       -- Minimum allowed click interval in ms (prevents tight CPU loops)
+})
 ```
 
 ## Triggers
@@ -20,34 +20,48 @@ wayclick.set_global {
 Rapidly clicks a mouse button at a fixed interval.
 
 ```lua
-wayclick.trigger {
+wayclick.register_trigger({
     id = "rapid_fire",
     mode = "toggle",          -- toggle | hold | oneshot
-    action = wayclick.auto_click {
+    action = wayclick.auto_click({
         button = "left",      -- left | right | middle | button4 | button5
         interval_ms = 10,     -- Milliseconds between clicks
         jitter_ms = 5,        -- Random ± jitter added to interval (anti-detection)
         hold_ms = 0,          -- Milliseconds to hold button down per click (0 = instant)
-    },
-    cooldown_ms = 100,        -- Override global cooldown for this trigger
+    }),
+    cooldown_ms = 100,        -- Cooldown before this trigger can re-activate (ms)
     duration_ms = 5000,       -- Auto-stop after N ms (0 = unlimited)
-}
+})
 ```
 
-### key_sequence
+### key_press
 
-Presses and releases a sequence of keys.
+Presses and releases a single keyboard key.
 
 ```lua
-wayclick.trigger {
-    id = "key_matrix",
-    mode = "toggle",
-    action = wayclick.key_sequence {
-        keys = { "KEY_A", "KEY_S", "KEY_D", "KEY_F" },
-        interval_ms = 50,
-        jitter_ms = 10,
-    },
-}
+wayclick.register_trigger({
+    id = "press_a",
+    mode = "oneshot",
+    action = wayclick.key_press({ key = "KEY_A" }),
+})
+```
+
+To press multiple keys in sequence, use `wayclick.sequence`:
+
+```lua
+wayclick.register_trigger({
+    id = "key_combo",
+    mode = "oneshot",
+    action = wayclick.sequence({
+        actions = {
+            wayclick.key_press({ key = "KEY_A" }),
+            wayclick.delay({ ms = 50 }),
+            wayclick.key_press({ key = "KEY_S" }),
+            wayclick.delay({ ms = 50 }),
+            wayclick.key_press({ key = "KEY_D" }),
+        },
+    }),
+})
 ```
 
 ### scroll
@@ -55,15 +69,15 @@ wayclick.trigger {
 Scrolls in a direction.
 
 ```lua
-wayclick.trigger {
+wayclick.register_trigger({
     id = "scroll_down",
     mode = "hold",
-    action = wayclick.scroll {
+    action = wayclick.scroll({
         direction = "down",   -- up | down | left | right
         amount = 3,
         interval_ms = 100,
-    },
-}
+    }),
+})
 ```
 
 ### mouse_move
@@ -71,15 +85,15 @@ wayclick.trigger {
 Moves the mouse cursor relative to its current position.
 
 ```lua
-wayclick.trigger {
+wayclick.register_trigger({
     id = "jiggle",
     mode = "oneshot",
-    action = wayclick.mouse_move {
+    action = wayclick.mouse_move({
         dx = 5,
         dy = 0,
         interval_ms = 50,
-    },
-}
+    }),
+})
 ```
 
 ### composite (parallel)
@@ -87,14 +101,16 @@ wayclick.trigger {
 Run multiple actions simultaneously.
 
 ```lua
-wayclick.trigger {
+wayclick.register_trigger({
     id = "combo",
     mode = "toggle",
-    action = wayclick.parallel {
-        wayclick.auto_click { button = "left", interval_ms = 10 },
-        wayclick.key_sequence { keys = { "KEY_SPACE" }, interval_ms = 200 },
-    },
-}
+    action = wayclick.parallel({
+        actions = {
+            wayclick.auto_click({ button = "left", interval_ms = 10 }),
+            wayclick.key_press({ key = "KEY_SPACE" }),
+        },
+    }),
+})
 ```
 
 ### composite (sequence)
@@ -102,14 +118,17 @@ wayclick.trigger {
 Run multiple actions one after another.
 
 ```lua
-wayclick.trigger {
+wayclick.register_trigger({
     id = "macro",
     mode = "oneshot",
-    action = wayclick.sequence {
-        wayclick.key_sequence { keys = { "KEY_A" }, interval_ms = 50, repeat = 3 },
-        wayclick.auto_click { button = "left", interval_ms = 100, repeat = 5 },
-    },
-}
+    action = wayclick.sequence({
+        actions = {
+            wayclick.key_press({ key = "KEY_A" }),
+            wayclick.delay({ ms = 100 }),
+            wayclick.auto_click({ button = "left", interval_ms = 100 }),
+        },
+    }),
+})
 ```
 
 ### delay
@@ -154,6 +173,7 @@ wayclick.register_trigger({
         x = 1000, y = 500,
         button = "left",    -- Optional, default: "left"
         hold_ms = 0,        -- Optional, default: 0
+        settle_ms = 5,      -- Optional, default: 5 (ms to wait after move before clicking)
     }),
 })
 ```
@@ -285,14 +305,14 @@ Place helper Lua files in `~/.config/wayclick/lua/`. They can be loaded with
 ```lua
 -- ~/.config/wayclick/lua/my_triggers.lua
 local M = {}
-M.my_action = wayclick.auto_click { button = "left", interval_ms = 20 }
+M.my_action = wayclick.auto_click({ button = "left", interval_ms = 20 })
 return M
 ```
 
 ```lua
 -- init.lua
 local my = require("my_triggers")
-wayclick.trigger { id = "fast", mode = "toggle", action = my.my_action }
+wayclick.register_trigger({ id = "fast", mode = "toggle", action = my.my_action })
 ```
 
 ## Key Names
@@ -346,14 +366,15 @@ See the full list with `wayclick-evdev-dump monitor`.
 | `wayclickctl layer get`    | Show current active layer          |
 | `wayclickctl layer set <name>` | Switch to a different layer    |
 | `wayclickctl ping`         | Check if daemon is running         |
+| `wayclickctl waybar`       | Output Waybar-compatible JSON      |
 
 ## SIGHUP Reload
 
 The daemon reloads its configuration on `SIGHUP`:
 
 ```bash
-systemctl reload wayclickd    # via systemd
-kill -HUP $(pidof wayclickd)  # direct signal
+systemctl --user reload wayclickd    # via systemd
+kill -HUP $(pidof wayclickd)         # direct signal
 ```
 
 This reloads the Lua config and restarts the evdev monitor with new bindings.

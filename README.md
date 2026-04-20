@@ -312,7 +312,6 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model.
 | [SECURITY.md](docs/SECURITY.md) | Threat model, Lua sandbox, IPC security |
 | [BUILDING.md](docs/BUILDING.md) | Build from source, testing, fuzz testing |
 | [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development workflow, adding actions, code style |
-| [FEATURE_MATRIX.md](docs/FEATURE_MATRIX.md) | Comparison with AutoHotkey and XMBC |
 | [HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) | Hyprland keybinding examples |
 | [extras/waybar/](extras/waybar/) | Waybar status module with themes |
 

@@ -43,7 +43,7 @@ tests/                  Integration tests
 - **lua_api.rs** — Sandboxed Lua VM. Loads `init.lua`, registers the
   `wayclick.*` API table. Parses Lua tables into `Config`.
 - **engine.rs** — Trigger state machine (Idle → Active → Cooldown). Worker
-  thread management. Action execution loops (auto_click, key_sequence, scroll,
+  thread management. Action execution loops (auto_click, key_press, scroll,
   mouse_move, composite).
 - **ipc.rs** — JSON-RPC 2.0 over Unix socket with 4-byte BE length framing.
   `IpcServer` accepts connections, `ipc_request()` is the client helper.
@@ -75,7 +75,7 @@ Single-binary daemon. Startup sequence:
 ### wayclickctl
 
 Thin CLI that sends JSON-RPC requests to the daemon socket. Subcommands: ping,
-status, toggle, enable, disable, trigger, list, reload, logs.
+status, toggle, enable, disable, trigger, list, reload, logs, layer, waybar.
 
 ### wayclick-tui
 
@@ -96,7 +96,8 @@ JSON-RPC 2.0 over a UNIX stream socket.
 **Frame format:** `[4-byte big-endian length][UTF-8 JSON payload]`
 
 **Methods:** `ping`, `status`, `status_json`, `toggle`, `enable`, `disable`,
-`trigger`, `list_triggers`, `reload_config`, `logs_tail`
+`trigger`, `list_triggers`, `reload_config`, `logs_tail`, `set_layer`,
+`get_layer`
 
 ## Threading Model
 
