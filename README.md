@@ -41,6 +41,7 @@ required, fully scriptable with Lua.
 | `wayclickctl` | CLI — control the daemon (status, toggle, trigger, reload, layer) |
 | `wayclick-tui` | TUI — real-time dashboard with trigger state and logs |
 | `wayclick-evdev-dump` | Diagnostic — list devices, monitor events, identify buttons |
+| `wayclick-input-viz` | Visual testing — GPU-accelerated input visualizer with particle effects |
 
 ## Quick Start
 

@@ -5,6 +5,7 @@ members = [
   "crates/wayclickctl",
   "crates/wayclick-tui",
   "crates/wayclick-evdev-dump",
+  "crates/wayclick-input-viz",
   "tests",
 ]
 resolver = "2"

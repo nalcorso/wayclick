@@ -1,0 +1,17 @@
+[package]
+name = "wayclick-input-viz"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+description = "Visual input testing tool for wayclick — particle effects, event log, performance counters"
+include = ["src/**/*", "assets/**/*"]
+
+[[bin]]
+name = "wayclick-input-viz"
+path = "src/main.rs"
+
+[dependencies]
+macroquad = "0.4"
