@@ -7,6 +7,14 @@
 via evdev, execute configurable actions through uinput — Wayland-native, no X11
 required, fully scriptable with Lua.
 
+> **AI Disclosure** — This project was developed with the assistance of AI coding
+> agents (Claude Opus 4.6 via GitHub Copilot) running locally. Because the agents
+> run locally through the developer's GitHub Copilot session, all commits are
+> attributed to the maintainer's GitHub account rather than a separate AI user.
+> All AI-generated code was reviewed, tested, and approved by the maintainer. The
+> architecture, design decisions, and final implementation remain the
+> responsibility of the human author.
+
 ---
 
 ## Features
@@ -339,13 +347,6 @@ cd wayclick && ./scripts/dev.sh
 # Make changes, then:
 cargo test --workspace && cargo clippy --workspace -- -D warnings
 ```
-
-## AI Disclosure
-
-This project was developed with the assistance of AI coding agents (GitHub
-Copilot). All AI-generated code was reviewed, tested, and approved by the
-maintainer. The architecture, design decisions, and final implementation remain
-the responsibility of the human author.
 
 ## License
 
