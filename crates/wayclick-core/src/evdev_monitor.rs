@@ -181,12 +181,7 @@ fn spawn_device_thread(
         while running.load(Ordering::SeqCst) {
             match source.poll_events(Duration::from_millis(100)) {
                 Ok(events) => {
-                    for event in events {
-                        if event.event_type == EV_KEY && event.value == 1 {
-                            // Key press — check if it matches a button binding
-                            dispatch_button_event(event.code, &binding, &engine, &logger);
-                        }
-                    }
+                    process_device_events(&events, &binding, &engine, &logger);
                 }
                 Err(crate::evdev_source::SourceError::Disconnected) => {
                     logger.warn(format!("Device {:?} disconnected", path));
@@ -205,8 +200,28 @@ fn spawn_device_thread(
     })
 }
 
+/// Process a batch of raw evdev events — extracted for testability.
+/// Handles EV_KEY press/release dispatch and filters repeat events.
+fn process_device_events(
+    events: &[evdev_source::InputEvent],
+    binding: &DeviceBinding,
+    engine: &Arc<Mutex<Engine>>,
+    logger: &Arc<Logger>,
+) {
+    for event in events {
+        if event.event_type == EV_KEY {
+            match event.value {
+                1 => dispatch_button_event(event.code, true, binding, engine, logger),
+                0 => dispatch_button_event(event.code, false, binding, engine, logger),
+                _ => {} // value==2 (repeat) — ignore
+            }
+        }
+    }
+}
+
 fn dispatch_button_event(
     code: u16,
+    press: bool,
     binding: &DeviceBinding,
     engine: &Arc<Mutex<Engine>>,
     logger: &Arc<Logger>,
@@ -223,11 +238,13 @@ fn dispatch_button_event(
             }
             let code_name = bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
             logger.debug(format!(
-                "Button {} pressed, firing trigger '{}'",
-                code_name, bb.trigger_id
+                "Button {} {}, firing trigger '{}'",
+                code_name,
+                if press { "pressed" } else { "released" },
+                bb.trigger_id
             ));
             let mut eng = engine.lock().unwrap();
-            let _ = eng.trigger_event(&bb.trigger_id, true);
+            let _ = eng.trigger_event(&bb.trigger_id, press);
         }
     }
 }
@@ -258,7 +275,13 @@ fn match_device_inner(info: &DeviceInfo, device_match: &crate::config::DeviceMat
 mod tests {
     use super::*;
     use crate::config::*;
+    use crate::engine::Engine;
+    use crate::evdev_source::InputEvent;
+    use crate::input_backend::MockBackend;
+    use crate::logger::LogLevel;
     use std::path::PathBuf;
+    use std::thread;
+    use std::time::Duration;
 
     fn test_device() -> DeviceInfo {
         DeviceInfo {
@@ -374,5 +397,174 @@ mod tests {
             path: "/dev/input/event5".into(),
         });
         assert!(match_device(&info, &binding));
+    }
+
+    // --- Phase 1: Key release handling tests ---
+
+    fn make_hold_engine() -> (Arc<Mutex<Engine>>, Arc<Mutex<Vec<crate::input_backend::BackendCall>>>, Arc<Logger>) {
+        let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
+        logger.set_quiet(true);
+        let backend = MockBackend::new();
+        let calls = backend.calls_clone();
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "hold_test".into(),
+                name: "Hold Test".into(),
+                description: String::new(),
+                mode: TriggerMode::Hold,
+                action: ActionConfig::AutoClick {
+                    button: MouseButton::Left,
+                    interval_ms: 5,
+                    duration_ms: None,
+                    jitter_ms: 0,
+                    hold_ms: 0,
+                },
+                cooldown_ms: None,
+            }],
+            ..Default::default()
+        };
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            Arc::new(backend),
+            logger.clone(),
+            "test".into(),
+        )));
+        engine.lock().unwrap().set_enabled(true);
+        (engine, calls, logger)
+    }
+
+    fn hold_binding() -> DeviceBinding {
+        DeviceBinding {
+            device_match: DeviceMatch::ByName {
+                contains: "test".into(),
+            },
+            button_bindings: vec![ButtonBinding {
+                codes: vec![0x114], // BTN_EXTRA
+                code_names: vec!["BTN_EXTRA".into()],
+                trigger_id: "hold_test".into(),
+                hold_trigger_id: None,
+                hold_threshold_ms: None,
+                layer: None,
+            }],
+            exclusive: false,
+        }
+    }
+
+    #[test]
+    fn test_hold_mode_starts_on_press_stops_on_release() {
+        let (engine, calls, logger) = make_hold_engine();
+        let binding = hold_binding();
+
+        // Press: hold trigger should start
+        let press = vec![InputEvent {
+            event_type: EV_KEY,
+            code: 0x114,
+            value: 1,
+        }];
+        process_device_events(&press, &binding, &engine, &logger);
+
+        // Wait for some clicks to accumulate
+        thread::sleep(Duration::from_millis(50));
+        let clicks_during_hold = calls.lock().unwrap().len();
+        assert!(
+            clicks_during_hold > 0,
+            "Hold trigger should produce clicks while held"
+        );
+
+        // Release: hold trigger should stop
+        let release = vec![InputEvent {
+            event_type: EV_KEY,
+            code: 0x114,
+            value: 0,
+        }];
+        process_device_events(&release, &binding, &engine, &logger);
+
+        // Allow worker to wind down
+        thread::sleep(Duration::from_millis(30));
+        let clicks_at_release = calls.lock().unwrap().len();
+
+        // Wait and ensure no more clicks
+        thread::sleep(Duration::from_millis(50));
+        let clicks_after = calls.lock().unwrap().len();
+
+        assert_eq!(
+            clicks_at_release, clicks_after,
+            "Hold trigger should stop on release, but got {} at release vs {} after",
+            clicks_at_release, clicks_after
+        );
+    }
+
+    #[test]
+    fn test_repeat_events_do_not_retrigger() {
+        let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
+        logger.set_quiet(true);
+        let backend = MockBackend::new();
+        let calls = backend.calls_clone();
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "toggle_test".into(),
+                name: "Toggle Test".into(),
+                description: String::new(),
+                mode: TriggerMode::Toggle,
+                action: ActionConfig::AutoClick {
+                    button: MouseButton::Left,
+                    interval_ms: 5,
+                    duration_ms: None,
+                    jitter_ms: 0,
+                    hold_ms: 0,
+                },
+                cooldown_ms: None,
+            }],
+            ..Default::default()
+        };
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            Arc::new(backend),
+            logger.clone(),
+            "test".into(),
+        )));
+        engine.lock().unwrap().set_enabled(true);
+
+        let binding = DeviceBinding {
+            device_match: DeviceMatch::ByName {
+                contains: "test".into(),
+            },
+            button_bindings: vec![ButtonBinding {
+                codes: vec![0x114],
+                code_names: vec!["BTN_EXTRA".into()],
+                trigger_id: "toggle_test".into(),
+                hold_trigger_id: None,
+                hold_threshold_ms: None,
+                layer: None,
+            }],
+            exclusive: false,
+        };
+
+        // Press toggles ON
+        let press = vec![InputEvent {
+            event_type: EV_KEY,
+            code: 0x114,
+            value: 1,
+        }];
+        process_device_events(&press, &binding, &engine, &logger);
+        thread::sleep(Duration::from_millis(30));
+        let clicks_after_press = calls.lock().unwrap().len();
+        assert!(clicks_after_press > 0, "Toggle should be ON after press");
+
+        // Repeat (value=2) should NOT re-toggle (which would turn it OFF)
+        let repeat = vec![InputEvent {
+            event_type: EV_KEY,
+            code: 0x114,
+            value: 2,
+        }];
+        process_device_events(&repeat, &binding, &engine, &logger);
+        thread::sleep(Duration::from_millis(30));
+        let clicks_after_repeat = calls.lock().unwrap().len();
+        assert!(
+            clicks_after_repeat > clicks_after_press,
+            "Toggle should still be ON after repeat event, got {} vs {} before repeat",
+            clicks_after_repeat,
+            clicks_after_press
+        );
     }
 }
