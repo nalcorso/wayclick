@@ -253,6 +253,10 @@ wayclick.bind_device({
         -- Layer-specific binding (only active in a specific layer)
         { code = "BTN_SIDE", trigger = "base_action", layer = "base" },
         { code = "BTN_SIDE", trigger = "combat_action", layer = "combat" },
+
+        -- Scroll wheel remapping (requires exclusive = true)
+        -- { scroll = "up",   trigger = "left_click" },
+        -- { scroll = "down", trigger = "left_click" },
     },
 })
 ```
@@ -266,6 +270,7 @@ wayclick.bind_device({
 | `hold_trigger` | string?  | Trigger ID to fire on long-press (requires `hold_ms`)    |
 | `hold_ms`      | number?  | Hold threshold in ms (requires `hold_trigger`)           |
 | `layer`        | string?  | Only active when this layer is current (nil = all layers)|
+| `scroll`       | string?  | Scroll direction: `"up"`, `"down"`, `"left"`, `"right"`. Requires `exclusive = true`. Use instead of `code` for scroll bindings |
 
 ## Layers
 

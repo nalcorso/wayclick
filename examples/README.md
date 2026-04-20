@@ -8,6 +8,7 @@ Example Lua configurations for wayclick. Copy any example to
 | Example | Description |
 |---|---|
 | [morse_clicker.lua](morse_clicker.lua) | Clicks mouse morse code for any word. Includes full A–Z + 0–9 morse dictionary with generic `morse_letter()` and `morse_word()` helpers. Demo spells "banana" for the Revolution Idle achievement. |
+| [scroll_remap.lua](scroll_remap.lua) | Remaps mouse wheel up/down to left-click for ARPG gaming. Demonstrates exclusive device mode with scroll bindings and automatic event forwarding. |
 
 ## Usage
 

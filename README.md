@@ -23,6 +23,8 @@ required, fully scriptable with Lua.
   (fire once)
 - **Layers** — switch between binding sets at runtime (e.g. "base" vs "combat")
 - **Button chording** — bind actions to multi-button combos like `BTN_SIDE+BTN_EXTRA`
+- **Scroll remapping** — remap mouse wheel up/down to clicks or any action
+  (popular for ARPGs) with magnitude-aware multi-fire
 - **Hot-reload** — edit your config and send `SIGHUP` or `wayclickctl reload` —
   no restart needed
 - **TUI dashboard** — real-time view of triggers, devices, and logs

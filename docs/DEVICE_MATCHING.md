@@ -92,8 +92,13 @@ wayclick.bind_device({
 ## Exclusive Mode
 
 When `exclusive = true`, wayclick grabs the device exclusively using
-`EVIOCGRAB`. This prevents other applications from receiving events from the
-device.
+`EVIOCGRAB`. This prevents other applications from receiving raw events from the
+device. Wayclick forwards non-consumed events (mouse movement, unmatched buttons,
+unmatched scroll) through its virtual pointer device, so the mouse continues to
+function normally — only matched events are intercepted.
+
+Exclusive mode is **required** for scroll wheel remapping (to prevent both
+the original scroll and the remapped click from reaching the application).
 
 ```lua
 wayclick.bind_device({
@@ -129,6 +134,36 @@ wayclick.bind_device({
 
 Use `wayclick-evdev-dump monitor --device /dev/input/eventN` to discover the
 exact codes emitted by your device's buttons.
+
+## Scroll Bindings
+
+Scroll wheel events can be remapped to trigger actions. This is commonly used
+in ARPGs to convert scroll wheel to rapid left-clicks. Scroll bindings require
+`exclusive = true`.
+
+```lua
+wayclick.bind_device({
+    name = "G Pro",
+    exclusive = true,
+    bindings = {
+        { scroll = "up",   trigger = "left_click" },
+        { scroll = "down", trigger = "left_click" },
+    }
+})
+```
+
+### Scroll Directions
+
+| Direction | Description                |
+|-----------|----------------------------|
+| `up`      | Scroll wheel up            |
+| `down`    | Scroll wheel down          |
+| `left`    | Horizontal scroll left     |
+| `right`   | Horizontal scroll right    |
+
+Scroll magnitude is respected — fast scrolling (multiple notches per frame)
+fires the trigger multiple times. Hi-res scroll events are automatically
+suppressed when a standard scroll event matches, preventing double-triggering.
 
 ## Hotplug
 
