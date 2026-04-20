@@ -123,6 +123,7 @@ pub fn poll_input(
         MouseButton::Left,
         MouseButton::Right,
         MouseButton::Middle,
+        MouseButton::Unknown, // side/extra/forward/back (all map to Unknown in macroquad)
     ];
     for btn in buttons {
         if is_mouse_button_pressed(btn) {

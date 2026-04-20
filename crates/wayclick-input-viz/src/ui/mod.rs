@@ -230,9 +230,9 @@ pub fn draw_status_bar(
 
     // Totals
     let totals = format!(
-        "L:{} R:{} M:{} Scroll:{} Keys:{}",
+        "L:{} R:{} M:{} X:{} Scroll:{} Keys:{}",
         perf.left_total, perf.right_total, perf.middle_total,
-        perf.scroll_total, perf.key_total
+        perf.extra_total, perf.scroll_total, perf.key_total
     );
     draw_text_ex(
         &totals,

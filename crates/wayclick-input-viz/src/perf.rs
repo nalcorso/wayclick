@@ -8,6 +8,7 @@ pub struct PerfCounters {
     pub left_total: u64,
     pub right_total: u64,
     pub middle_total: u64,
+    pub extra_total: u64,
     pub scroll_total: u64,
     pub key_total: u64,
 
@@ -35,6 +36,7 @@ impl PerfCounters {
             left_total: 0,
             right_total: 0,
             middle_total: 0,
+            extra_total: 0,
             scroll_total: 0,
             key_total: 0,
             click_times: VecDeque::new(),
@@ -55,7 +57,7 @@ impl PerfCounters {
             MouseButton::Left => self.left_total += 1,
             MouseButton::Right => self.right_total += 1,
             MouseButton::Middle => self.middle_total += 1,
-            _ => {}
+            MouseButton::Unknown => self.extra_total += 1,
         }
         self.click_times.push_back(self.elapsed);
         self.event_times.push_back(self.elapsed);
@@ -102,6 +104,6 @@ impl PerfCounters {
     }
 
     pub fn total_clicks(&self) -> u64 {
-        self.left_total + self.right_total + self.middle_total
+        self.left_total + self.right_total + self.middle_total + self.extra_total
     }
 }
