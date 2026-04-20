@@ -4,8 +4,8 @@
 [![Rust: 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 
 **Programmable mouse automation daemon for Linux.** Read physical button presses
-via evdev, execute configurable actions through uinput — Wayland-native, no X11
-required, fully scriptable with Lua.
+via evdev, execute configurable actions through uinput — works with any Linux
+desktop environment (Wayland, X11, or headless), fully scriptable with Lua.
 
 > **AI Disclosure** — This project was developed with the assistance of AI coding
 > agents (Claude Opus 4.6 via GitHub Copilot) running locally. Because the agents
@@ -21,8 +21,8 @@ required, fully scriptable with Lua.
 
 - **Lua-scriptable** — Neovim-style `init.lua` configuration with composable
   actions, helper functions, and module support
-- **Wayland & X11** — operates at the kernel input layer (evdev/uinput), works
-  with any compositor or display server
+- **Display server agnostic** — operates at the kernel input layer (evdev/uinput),
+  works with Wayland, X11, or any Linux environment
 - **Per-device targeting** — bind actions to specific mice by name, VID:PID, or
   physical port — survives USB reconnects via hotplug monitoring
 - **Composable actions** — auto-click, key sequences, mouse movement, scroll,
