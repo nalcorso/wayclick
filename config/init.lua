@@ -1,5 +1,6 @@
 -- wayclick default configuration
 -- MB5 (forward/extra button) toggles a left-click auto-clicker on and off.
+-- Scroll wheel up/down fires a left-click per notch (ARPG scroll-to-click).
 -- See examples/ for more advanced configs (morse code, macros, etc).
 
 wayclick.set_options({
@@ -20,9 +21,19 @@ wayclick.register_trigger({
   }),
 })
 
+wayclick.register_trigger({
+  id = "left_click",
+  name = "Scroll Click",
+  mode = "oneshot",
+  action = wayclick.click({ button = "left" }),
+})
+
 wayclick.bind_device({
-  name = "",          -- matches any device name
+  name = "Logitech USB Receiver Mouse",
+  exclusive = true,
   bindings = {
     { code = "BTN_EXTRA", trigger = "auto_clicker" },
+    { scroll = "up",   trigger = "left_click" },
+    { scroll = "down", trigger = "left_click" },
   },
 })
