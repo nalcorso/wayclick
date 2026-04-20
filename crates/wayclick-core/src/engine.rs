@@ -147,7 +147,12 @@ impl Engine {
             .clone();
 
         match trigger.mode {
-            TriggerMode::Toggle => self.handle_toggle(&trigger),
+            TriggerMode::Toggle => {
+                if !press {
+                    return Ok(());
+                }
+                self.handle_toggle(&trigger)
+            }
             TriggerMode::Hold => self.handle_hold(&trigger, press),
             TriggerMode::OneShot => self.handle_oneshot(&trigger),
         }
@@ -792,6 +797,34 @@ mod tests {
 
         let call_count = calls.lock().unwrap().len();
         assert!(call_count > 0, "Expected clicks, got none");
+    }
+
+    #[test]
+    fn test_toggle_ignores_release() {
+        // Simulates a real button press/release cycle: toggle should start on
+        // press and remain active after release (not stop like hold mode).
+        let (mut engine, calls) =
+            test_engine(vec![auto_click_trigger("test", 5, TriggerMode::Toggle)]);
+        engine.set_enabled(true);
+
+        // Button down → starts
+        engine.trigger_event("test", true).unwrap();
+        thread::sleep(Duration::from_millis(30));
+
+        let count_before_release = calls.lock().unwrap().len();
+        assert!(count_before_release > 0, "Toggle should start clicking on press");
+
+        // Button up → should NOT stop (toggle stays active until next press)
+        engine.trigger_event("test", false).unwrap();
+        thread::sleep(Duration::from_millis(30));
+
+        let count_after_release = calls.lock().unwrap().len();
+        assert!(
+            count_after_release > count_before_release,
+            "Toggle must stay active after release: had {} clicks before release, {} after",
+            count_before_release,
+            count_after_release,
+        );
     }
 
     #[test]
