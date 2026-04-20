@@ -169,6 +169,7 @@ pub enum ActionConfig {
         y: i32,
         button: MouseButton,
         hold_ms: u32,
+        settle_ms: u32,
     },
     Drag {
         from_x: i32,

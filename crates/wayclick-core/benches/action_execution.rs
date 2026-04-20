@@ -108,13 +108,26 @@ fn bench_execute_action_sync(c: &mut Criterion) {
         b.iter(|| bench::bench_execute_action_sync(black_box(&action), &backend, &logger))
     });
 
-    // ClickAt (move + click, has 5ms thread::sleep — measure full path)
-    group.bench_function("click_at", |b| {
+    // ClickAt with settle_ms=0 (no sleep — pure dispatch overhead)
+    group.bench_function("click_at_no_settle", |b| {
         let action = ActionConfig::ClickAt {
             x: 100,
             y: 200,
             button: MouseButton::Left,
             hold_ms: 0,
+            settle_ms: 0,
+        };
+        b.iter(|| bench::bench_execute_action_sync(black_box(&action), &backend, &logger))
+    });
+
+    // ClickAt with default settle_ms=5 (includes 5ms sleep)
+    group.bench_function("click_at_settle_5ms", |b| {
+        let action = ActionConfig::ClickAt {
+            x: 100,
+            y: 200,
+            button: MouseButton::Left,
+            hold_ms: 0,
+            settle_ms: 5,
         };
         b.iter(|| bench::bench_execute_action_sync(black_box(&action), &backend, &logger))
     });

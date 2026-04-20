@@ -324,8 +324,6 @@ fn execute_action_loop(
     logger: &Arc<Logger>,
     stop_rx: &mpsc::Receiver<()>,
 ) -> Result<(), BackendError> {
-    let action_start = Instant::now();
-
     match action {
         ActionConfig::AutoClick {
             button,
@@ -333,85 +331,97 @@ fn execute_action_loop(
             duration_ms,
             jitter_ms,
             hold_ms,
-        } => loop {
-            if stop_rx.try_recv().is_ok() {
-                break;
-            }
-            do_click(backend, *button, *hold_ms)?;
-            let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
-            if !interruptible_sleep(sleep_ms, stop_rx) {
-                break;
-            }
-            if let Some(dur) = duration_ms {
-                if action_start.elapsed().as_millis() >= *dur as u128 {
+        } => {
+            let action_start = Instant::now();
+            loop {
+                if stop_rx.try_recv().is_ok() {
                     break;
                 }
+                do_click(backend, *button, *hold_ms)?;
+                let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
+                if !interruptible_sleep(sleep_ms, stop_rx) {
+                    break;
+                }
+                if let Some(dur) = duration_ms {
+                    if action_start.elapsed().as_millis() >= *dur as u128 {
+                        break;
+                    }
+                }
             }
-        },
+        }
         ActionConfig::KeyPress {
             key_code,
             interval_ms,
             duration_ms,
             jitter_ms,
             ..
-        } => loop {
-            if stop_rx.try_recv().is_ok() {
-                break;
-            }
-            backend.key_press(*key_code)?;
-            backend.key_release(*key_code)?;
-            let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
-            if !interruptible_sleep(sleep_ms, stop_rx) {
-                break;
-            }
-            if let Some(dur) = duration_ms {
-                if action_start.elapsed().as_millis() >= *dur as u128 {
+        } => {
+            let action_start = Instant::now();
+            loop {
+                if stop_rx.try_recv().is_ok() {
                     break;
                 }
+                backend.key_press(*key_code)?;
+                backend.key_release(*key_code)?;
+                let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
+                if !interruptible_sleep(sleep_ms, stop_rx) {
+                    break;
+                }
+                if let Some(dur) = duration_ms {
+                    if action_start.elapsed().as_millis() >= *dur as u128 {
+                        break;
+                    }
+                }
             }
-        },
+        }
         ActionConfig::ScrollWheel {
             direction,
             amount,
             interval_ms,
             duration_ms,
             jitter_ms,
-        } => loop {
-            if stop_rx.try_recv().is_ok() {
-                break;
-            }
-            backend.scroll(*direction, *amount)?;
-            let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
-            if !interruptible_sleep(sleep_ms, stop_rx) {
-                break;
-            }
-            if let Some(dur) = duration_ms {
-                if action_start.elapsed().as_millis() >= *dur as u128 {
+        } => {
+            let action_start = Instant::now();
+            loop {
+                if stop_rx.try_recv().is_ok() {
                     break;
                 }
+                backend.scroll(*direction, *amount)?;
+                let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
+                if !interruptible_sleep(sleep_ms, stop_rx) {
+                    break;
+                }
+                if let Some(dur) = duration_ms {
+                    if action_start.elapsed().as_millis() >= *dur as u128 {
+                        break;
+                    }
+                }
             }
-        },
+        }
         ActionConfig::MouseMove {
             dx,
             dy,
             interval_ms,
             duration_ms,
             jitter_ms,
-        } => loop {
-            if stop_rx.try_recv().is_ok() {
-                break;
-            }
-            backend.move_relative(*dx, *dy)?;
-            let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
-            if !interruptible_sleep(sleep_ms, stop_rx) {
-                break;
-            }
-            if let Some(dur) = duration_ms {
-                if action_start.elapsed().as_millis() >= *dur as u128 {
+        } => {
+            let action_start = Instant::now();
+            loop {
+                if stop_rx.try_recv().is_ok() {
                     break;
                 }
+                backend.move_relative(*dx, *dy)?;
+                let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
+                if !interruptible_sleep(sleep_ms, stop_rx) {
+                    break;
+                }
+                if let Some(dur) = duration_ms {
+                    if action_start.elapsed().as_millis() >= *dur as u128 {
+                        break;
+                    }
+                }
             }
-        },
+        }
         ActionConfig::Composite {
             mode: CompositeMode::Parallel,
             actions,
@@ -462,9 +472,12 @@ fn execute_action_loop(
             y,
             button,
             hold_ms,
+            settle_ms,
         } => {
             backend.move_absolute(*x, *y)?;
-            thread::sleep(Duration::from_millis(5));
+            if *settle_ms > 0 {
+                thread::sleep(Duration::from_millis(*settle_ms as u64));
+            }
             do_click(backend, *button, *hold_ms)?;
         }
         ActionConfig::Drag {
@@ -516,8 +529,6 @@ fn execute_action_sync(
     backend: &Arc<dyn InputBackend>,
     logger: &Arc<Logger>,
 ) -> Result<(), BackendError> {
-    let action_start = Instant::now();
-
     match action {
         ActionConfig::AutoClick {
             button,
@@ -531,6 +542,7 @@ fn execute_action_sync(
                 // Single click
                 do_click(backend, *button, *hold_ms)?;
             } else {
+                let action_start = Instant::now();
                 loop {
                     do_click(backend, *button, *hold_ms)?;
                     if action_start.elapsed().as_millis() >= dur as u128 {
@@ -553,6 +565,7 @@ fn execute_action_sync(
                 backend.key_press(*key_code)?;
                 backend.key_release(*key_code)?;
             } else {
+                let action_start = Instant::now();
                 loop {
                     backend.key_press(*key_code)?;
                     backend.key_release(*key_code)?;
@@ -608,9 +621,12 @@ fn execute_action_sync(
             y,
             button,
             hold_ms,
+            settle_ms,
         } => {
             backend.move_absolute(*x, *y)?;
-            thread::sleep(Duration::from_millis(5));
+            if *settle_ms > 0 {
+                thread::sleep(Duration::from_millis(*settle_ms as u64));
+            }
             do_click(backend, *button, *hold_ms)?;
         }
         ActionConfig::Drag {
@@ -1008,6 +1024,7 @@ mod tests {
                 y: 300,
                 button: MouseButton::Left,
                 hold_ms: 0,
+                settle_ms: 5,
             },
             cooldown_ms: None,
         };

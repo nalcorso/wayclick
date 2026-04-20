@@ -448,12 +448,14 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 .map_err(|_| LuaError::RuntimeError("click_at requires 'y' field".into()))?;
             let button: String = table.get("button").unwrap_or_else(|_| "left".into());
             let hold_ms: u32 = table.get("hold_ms").unwrap_or(0);
+            let settle_ms: u32 = table.get("settle_ms").unwrap_or(5);
             let action = lua.create_table()?;
             action.set("_type", "click_at")?;
             action.set("_x", x)?;
             action.set("_y", y)?;
             action.set("_button", button)?;
             action.set("_hold_ms", hold_ms)?;
+            action.set("_settle_ms", settle_ms)?;
             Ok(action)
         })
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
@@ -910,11 +912,13 @@ fn parse_action_table(table: &LuaTable, depth: usize) -> Result<ActionConfig, Lu
             let button = MouseButton::from_str_name(&button_str)
                 .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
             let hold_ms: u32 = table.get("_hold_ms").unwrap_or(0);
+            let settle_ms: u32 = table.get("_settle_ms").unwrap_or(5);
             Ok(ActionConfig::ClickAt {
                 x,
                 y,
                 button,
                 hold_ms,
+                settle_ms,
             })
         }
         "drag" => {
@@ -1695,11 +1699,13 @@ mod tests {
                 y,
                 button,
                 hold_ms,
+                settle_ms,
             } => {
                 assert_eq!(*x, 500);
                 assert_eq!(*y, 300);
                 assert_eq!(*button, MouseButton::Right);
                 assert_eq!(*hold_ms, 10);
+                assert_eq!(*settle_ms, 5);
             }
             _ => panic!("Expected ClickAt"),
         }
@@ -1722,10 +1728,34 @@ mod tests {
         let config = load_config(&path, &test_logger()).unwrap();
         match &config.triggers[0].action {
             ActionConfig::ClickAt {
-                button, hold_ms, ..
+                button, hold_ms, settle_ms, ..
             } => {
                 assert_eq!(*button, MouseButton::Left);
                 assert_eq!(*hold_ms, 0);
+                assert_eq!(*settle_ms, 5);
+            }
+            _ => panic!("Expected ClickAt"),
+        }
+    }
+
+    #[test]
+    fn test_click_at_custom_settle_ms() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.click_at({ x = 100, y = 200, settle_ms = 0 }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::ClickAt { settle_ms, .. } => {
+                assert_eq!(*settle_ms, 0);
             }
             _ => panic!("Expected ClickAt"),
         }
@@ -2023,7 +2053,8 @@ mod tests {
                 x: 0,
                 y: 0,
                 button: MouseButton::Left,
-                hold_ms: 0
+                hold_ms: 0,
+                settle_ms: 5,
             }
             .type_name(),
             "click_at"
@@ -2056,7 +2087,8 @@ mod tests {
             x: 0,
             y: 0,
             button: MouseButton::Left,
-            hold_ms: 0
+            hold_ms: 0,
+            settle_ms: 5,
         }
         .is_oneshot_only());
         assert!(ActionConfig::Drag {
