@@ -33,7 +33,14 @@ pub struct InputEvent {
 }
 
 // Linux event types
+pub const EV_SYN: u16 = 0x00;
 pub const EV_KEY: u16 = 0x01;
+pub const EV_REL: u16 = 0x02;
+pub const EV_ABS: u16 = 0x03;
+
+// SYN event codes
+pub const SYN_REPORT: u16 = 0x00;
+pub const SYN_DROPPED: u16 = 0x01;
 
 pub trait InputSource: Send {
     fn device_info(&self) -> DeviceInfo;

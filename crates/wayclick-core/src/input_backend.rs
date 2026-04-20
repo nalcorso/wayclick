@@ -24,6 +24,12 @@ pub trait InputBackend: Send + Sync {
     fn move_relative(&self, dx: i32, dy: i32) -> Result<(), BackendError>;
     fn move_absolute(&self, x: i32, y: i32) -> Result<(), BackendError>;
     fn name(&self) -> &str;
+
+    /// Forward a complete evdev frame through the virtual device.
+    /// Each event is (type, code, value). A SYN_REPORT is appended automatically.
+    fn forward_frame(&self, _events: &[(u16, u16, i32)]) -> Result<(), BackendError> {
+        Ok(()) // default no-op
+    }
 }
 
 /// Dry-run backend: logs all calls, never fails.
@@ -107,6 +113,7 @@ pub enum BackendCall {
     Scroll(ScrollDirection, i32),
     MoveRelative(i32, i32),
     MoveAbsolute(i32, i32),
+    ForwardFrame(Vec<(u16, u16, i32)>),
 }
 
 pub struct MockBackend {
@@ -203,6 +210,14 @@ impl InputBackend for MockBackend {
 
     fn name(&self) -> &str {
         "mock"
+    }
+
+    fn forward_frame(&self, events: &[(u16, u16, i32)]) -> Result<(), BackendError> {
+        self.calls
+            .lock()
+            .unwrap()
+            .push(BackendCall::ForwardFrame(events.to_vec()));
+        Ok(())
     }
 }
 

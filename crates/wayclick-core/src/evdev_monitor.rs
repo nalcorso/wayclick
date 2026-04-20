@@ -2,9 +2,10 @@
 
 use crate::config::DeviceBinding;
 use crate::engine::Engine;
-use crate::evdev_source::{self, DeviceInfo, EvdevSource, InputSource, EV_KEY};
+use crate::evdev_source::{self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, SYN_DROPPED, SYN_REPORT};
+use crate::input_backend::InputBackend;
 use crate::logger::Logger;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,7 @@ use std::time::Duration;
 pub struct EvdevMonitor {
     engine: Arc<Mutex<Engine>>,
     logger: Arc<Logger>,
+    backend: Option<Arc<dyn InputBackend>>,
     config_bindings: Vec<DeviceBinding>,
     running: Arc<AtomicBool>,
     device_threads: Vec<JoinHandle<()>>,
@@ -26,12 +28,18 @@ impl EvdevMonitor {
         Self {
             engine,
             logger,
+            backend: None,
             config_bindings: Vec::new(),
             running: Arc::new(AtomicBool::new(false)),
             device_threads: Vec::new(),
             scan_thread: None,
             tracked_devices: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Set the backend used for event forwarding in exclusive mode.
+    pub fn set_backend(&mut self, backend: Arc<dyn InputBackend>) {
+        self.backend = Some(backend);
     }
 
     pub fn configure(&mut self, bindings: Vec<DeviceBinding>) {
@@ -60,6 +68,7 @@ impl EvdevMonitor {
         let logger = self.logger.clone();
         let bindings = self.config_bindings.clone();
         let tracked = self.tracked_devices.clone();
+        let backend = self.backend.clone();
 
         self.scan_thread = Some(thread::spawn(move || {
             while running.load(Ordering::SeqCst) {
@@ -82,15 +91,16 @@ impl EvdevMonitor {
                                 dev.name, dev.path
                             ));
                             tracked.lock().unwrap().insert(dev.path.clone(), ());
-                            spawn_device_thread(
-                                dev.path.clone(),
-                                binding.exclusive,
-                                binding.clone(),
-                                engine.clone(),
-                                logger.clone(),
-                                running.clone(),
-                                tracked.clone(),
-                            );
+                            spawn_device_thread(DeviceThreadParams {
+                                path: dev.path.clone(),
+                                exclusive: binding.exclusive,
+                                binding: binding.clone(),
+                                engine: engine.clone(),
+                                logger: logger.clone(),
+                                running: running.clone(),
+                                tracked: tracked.clone(),
+                                backend: backend.clone(),
+                            });
                             break;
                         }
                     }
@@ -120,15 +130,16 @@ impl EvdevMonitor {
                         .unwrap()
                         .insert(dev.path.clone(), ());
 
-                    let handle = spawn_device_thread(
-                        dev.path.clone(),
-                        binding.exclusive,
-                        binding.clone(),
-                        self.engine.clone(),
-                        self.logger.clone(),
-                        self.running.clone(),
-                        self.tracked_devices.clone(),
-                    );
+                    let handle = spawn_device_thread(DeviceThreadParams {
+                        path: dev.path.clone(),
+                        exclusive: binding.exclusive,
+                        binding: binding.clone(),
+                        engine: self.engine.clone(),
+                        logger: self.logger.clone(),
+                        running: self.running.clone(),
+                        tracked: self.tracked_devices.clone(),
+                        backend: self.backend.clone(),
+                    });
                     self.device_threads.push(handle);
                     break; // Only match first binding per device
                 }
@@ -153,7 +164,7 @@ impl EvdevMonitor {
     }
 }
 
-fn spawn_device_thread(
+struct DeviceThreadParams {
     path: PathBuf,
     exclusive: bool,
     binding: DeviceBinding,
@@ -161,7 +172,20 @@ fn spawn_device_thread(
     logger: Arc<Logger>,
     running: Arc<AtomicBool>,
     tracked: Arc<Mutex<HashMap<PathBuf, ()>>>,
-) -> JoinHandle<()> {
+    backend: Option<Arc<dyn InputBackend>>,
+}
+
+fn spawn_device_thread(params: DeviceThreadParams) -> JoinHandle<()> {
+    let DeviceThreadParams {
+        path,
+        exclusive,
+        binding,
+        engine,
+        logger,
+        running,
+        tracked,
+        backend,
+    } = params;
     thread::spawn(move || {
         let mut source = match EvdevSource::open(&path, exclusive) {
             Ok(s) => s,
@@ -178,10 +202,13 @@ fn spawn_device_thread(
             path
         ));
 
+        let forward_backend = if exclusive { backend } else { None };
+        let mut processor = DeviceProcessor::new(binding, engine, logger.clone(), forward_backend);
+
         while running.load(Ordering::SeqCst) {
             match source.poll_events(Duration::from_millis(100)) {
                 Ok(events) => {
-                    process_device_events(&events, &binding, &engine, &logger);
+                    processor.process_events(&events);
                 }
                 Err(crate::evdev_source::SourceError::Disconnected) => {
                     logger.warn(format!("Device {:?} disconnected", path));
@@ -200,23 +227,189 @@ fn spawn_device_thread(
     })
 }
 
-/// Process a batch of raw evdev events — extracted for testability.
-/// Handles EV_KEY press/release dispatch and filters repeat events.
-fn process_device_events(
-    events: &[evdev_source::InputEvent],
-    binding: &DeviceBinding,
-    engine: &Arc<Mutex<Engine>>,
-    logger: &Arc<Logger>,
-) {
-    for event in events {
-        if event.event_type == EV_KEY {
-            match event.value {
-                1 => dispatch_button_event(event.code, true, binding, engine, logger),
-                0 => dispatch_button_event(event.code, false, binding, engine, logger),
-                _ => {} // value==2 (repeat) — ignore
+/// Whitelisted event types that can be forwarded through uinput.
+const FORWARDABLE_TYPES: [u16; 3] = [EV_KEY, EV_REL, EV_ABS];
+
+/// Per-device event processor. Maintains state across poll batches for
+/// frame accumulation and claim-based suppression.
+pub(crate) struct DeviceProcessor {
+    binding: DeviceBinding,
+    engine: Arc<Mutex<Engine>>,
+    logger: Arc<Logger>,
+    forward_backend: Option<Arc<dyn InputBackend>>,
+    pending_frame: Vec<evdev_source::InputEvent>,
+    /// Button codes that were claimed on press (suppressed).
+    /// Release events for these codes are also suppressed.
+    claimed_codes: HashSet<u16>,
+}
+
+impl DeviceProcessor {
+    pub(crate) fn new(
+        binding: DeviceBinding,
+        engine: Arc<Mutex<Engine>>,
+        logger: Arc<Logger>,
+        forward_backend: Option<Arc<dyn InputBackend>>,
+    ) -> Self {
+        Self {
+            binding,
+            engine,
+            logger,
+            forward_backend,
+            pending_frame: Vec::new(),
+            claimed_codes: HashSet::new(),
+        }
+    }
+
+    /// Process a batch of raw evdev events.
+    /// In exclusive mode: accumulates events into frames (SYN_REPORT-delimited),
+    /// claims matched events, and forwards the rest.
+    /// In non-exclusive mode: dispatches matched EV_KEY events immediately.
+    pub(crate) fn process_events(&mut self, events: &[evdev_source::InputEvent]) {
+        if self.forward_backend.is_some() {
+            for event in events {
+                if event.event_type == EV_SYN {
+                    match event.code {
+                        SYN_REPORT => {
+                            self.process_frame();
+                            self.pending_frame.clear();
+                        }
+                        SYN_DROPPED => {
+                            self.logger
+                                .warn("SYN_DROPPED: discarding partial frame");
+                            self.pending_frame.clear();
+                        }
+                        _ => {}
+                    }
+                } else {
+                    self.pending_frame.push(event.clone());
+                }
+            }
+        } else {
+            // Non-exclusive: immediate processing (no forwarding)
+            for event in events {
+                if event.event_type == EV_KEY {
+                    match event.value {
+                        1 => {
+                            dispatch_button_event(
+                                event.code,
+                                true,
+                                &self.binding,
+                                &self.engine,
+                                &self.logger,
+                            );
+                        }
+                        0 => {
+                            dispatch_button_event(
+                                event.code,
+                                false,
+                                &self.binding,
+                                &self.engine,
+                                &self.logger,
+                            );
+                        }
+                        _ => {} // repeat — ignore
+                    }
+                }
             }
         }
     }
+
+    /// Process a complete frame. Two-pass: (1) identify claims, (2) forward non-claimed.
+    fn process_frame(&mut self) {
+        let backend = match &self.forward_backend {
+            Some(b) => b.clone(),
+            None => return,
+        };
+
+        let mut suppress_indices: HashSet<usize> = HashSet::new();
+
+        // Pass 1: identify claims and suppressions
+        for (i, event) in self.pending_frame.iter().enumerate() {
+            if event.event_type == EV_KEY {
+                match event.value {
+                    1 => {
+                        // Press: try to claim via dispatch
+                        if try_claim_button(
+                            event.code,
+                            &self.binding,
+                            &self.engine,
+                            &self.logger,
+                        ) {
+                            self.claimed_codes.insert(event.code);
+                            suppress_indices.insert(i);
+                        }
+                    }
+                    0 => {
+                        // Release: suppress if code was claimed
+                        if self.claimed_codes.remove(&event.code) {
+                            dispatch_button_event(
+                                event.code,
+                                false,
+                                &self.binding,
+                                &self.engine,
+                                &self.logger,
+                            );
+                            suppress_indices.insert(i);
+                        }
+                    }
+                    2 => {
+                        // Repeat: suppress if code is claimed
+                        if self.claimed_codes.contains(&event.code) {
+                            suppress_indices.insert(i);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Pass 2: forward non-suppressed events (whitelisted types only)
+        let forward: Vec<(u16, u16, i32)> = self
+            .pending_frame
+            .iter()
+            .enumerate()
+            .filter(|(i, event)| {
+                !suppress_indices.contains(i) && FORWARDABLE_TYPES.contains(&event.event_type)
+            })
+            .map(|(_, e)| (e.event_type, e.code, e.value))
+            .collect();
+
+        if !forward.is_empty() {
+            let _ = backend.forward_frame(&forward);
+        }
+    }
+}
+
+/// Try to claim a button press: match binding, check layer, dispatch to engine.
+/// Returns true if the event was consumed (trigger fired or was already active).
+fn try_claim_button(
+    code: u16,
+    binding: &DeviceBinding,
+    engine: &Arc<Mutex<Engine>>,
+    logger: &Arc<Logger>,
+) -> bool {
+    for bb in &binding.button_bindings {
+        if bb.codes.len() == 1 && bb.codes[0] == code {
+            // Layer filtering
+            if let Some(ref layer) = bb.layer {
+                let eng = engine.lock().unwrap();
+                if eng.current_layer() != layer {
+                    continue;
+                }
+            }
+            let code_name = bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
+            logger.debug(format!(
+                "Button {} pressed, claiming trigger '{}'",
+                code_name, bb.trigger_id
+            ));
+            let mut eng = engine.lock().unwrap();
+            match eng.trigger_event(&bb.trigger_id, true) {
+                Ok(()) => return true,
+                Err(_) => return false, // Engine disabled, cooldown, etc. — don't claim
+            }
+        }
+    }
+    false
 }
 
 fn dispatch_button_event(
@@ -227,9 +420,7 @@ fn dispatch_button_event(
     logger: &Arc<Logger>,
 ) {
     for bb in &binding.button_bindings {
-        // Simple single-button match (chord/hold handled in evdev-monitor-rewrite)
         if bb.codes.len() == 1 && bb.codes[0] == code {
-            // Layer filtering
             if let Some(ref layer) = bb.layer {
                 let eng = engine.lock().unwrap();
                 if eng.current_layer() != layer {
@@ -450,10 +641,20 @@ mod tests {
         }
     }
 
+    fn make_processor(
+        binding: DeviceBinding,
+        engine: Arc<Mutex<Engine>>,
+        logger: Arc<Logger>,
+        forward_backend: Option<Arc<dyn InputBackend>>,
+    ) -> DeviceProcessor {
+        DeviceProcessor::new(binding, engine, logger, forward_backend)
+    }
+
     #[test]
     fn test_hold_mode_starts_on_press_stops_on_release() {
         let (engine, calls, logger) = make_hold_engine();
         let binding = hold_binding();
+        let mut proc = make_processor(binding, engine, logger, None);
 
         // Press: hold trigger should start
         let press = vec![InputEvent {
@@ -461,9 +662,8 @@ mod tests {
             code: 0x114,
             value: 1,
         }];
-        process_device_events(&press, &binding, &engine, &logger);
+        proc.process_events(&press);
 
-        // Wait for some clicks to accumulate
         thread::sleep(Duration::from_millis(50));
         let clicks_during_hold = calls.lock().unwrap().len();
         assert!(
@@ -477,13 +677,11 @@ mod tests {
             code: 0x114,
             value: 0,
         }];
-        process_device_events(&release, &binding, &engine, &logger);
+        proc.process_events(&release);
 
-        // Allow worker to wind down
         thread::sleep(Duration::from_millis(30));
         let clicks_at_release = calls.lock().unwrap().len();
 
-        // Wait and ensure no more clicks
         thread::sleep(Duration::from_millis(50));
         let clicks_after = calls.lock().unwrap().len();
 
@@ -540,13 +738,15 @@ mod tests {
             exclusive: false,
         };
 
+        let mut proc = make_processor(binding, engine, logger, None);
+
         // Press toggles ON
         let press = vec![InputEvent {
             event_type: EV_KEY,
             code: 0x114,
             value: 1,
         }];
-        process_device_events(&press, &binding, &engine, &logger);
+        proc.process_events(&press);
         thread::sleep(Duration::from_millis(30));
         let clicks_after_press = calls.lock().unwrap().len();
         assert!(clicks_after_press > 0, "Toggle should be ON after press");
@@ -557,7 +757,7 @@ mod tests {
             code: 0x114,
             value: 2,
         }];
-        process_device_events(&repeat, &binding, &engine, &logger);
+        proc.process_events(&repeat);
         thread::sleep(Duration::from_millis(30));
         let clicks_after_repeat = calls.lock().unwrap().len();
         assert!(
@@ -566,5 +766,412 @@ mod tests {
             clicks_after_repeat,
             clicks_after_press
         );
+    }
+
+    // --- Phase 2: Frame-based event forwarding tests ---
+
+    use crate::input_backend::BackendCall;
+    use crate::evdev_source::{EV_SYN, SYN_REPORT, SYN_DROPPED, EV_REL};
+
+    const BTN_EXTRA: u16 = 0x114;
+    const BTN_LEFT: u16 = 0x110;
+    const REL_X: u16 = 0x00;
+    const REL_Y: u16 = 0x01;
+
+    fn make_oneshot_engine(
+        trigger_id: &str,
+    ) -> (Arc<Mutex<Engine>>, Arc<Mutex<Vec<BackendCall>>>, Arc<Logger>) {
+        let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
+        logger.set_quiet(true);
+        let backend = MockBackend::new();
+        let calls = backend.calls_clone();
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: trigger_id.into(),
+                name: trigger_id.into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action: ActionConfig::AutoClick {
+                    button: MouseButton::Left,
+                    interval_ms: 10,
+                    duration_ms: Some(30),
+                    jitter_ms: 0,
+                    hold_ms: 0,
+                },
+                cooldown_ms: None,
+            }],
+            ..Default::default()
+        };
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            Arc::new(backend),
+            logger.clone(),
+            "test".into(),
+        )));
+        engine.lock().unwrap().set_enabled(true);
+        (engine, calls, logger)
+    }
+
+    fn exclusive_binding_for(trigger_id: &str) -> DeviceBinding {
+        DeviceBinding {
+            device_match: DeviceMatch::ByName {
+                contains: "test".into(),
+            },
+            button_bindings: vec![ButtonBinding {
+                codes: vec![BTN_EXTRA],
+                code_names: vec!["BTN_EXTRA".into()],
+                trigger_id: trigger_id.into(),
+                hold_trigger_id: None,
+                hold_threshold_ms: None,
+                layer: None,
+            }],
+            exclusive: true,
+        }
+    }
+
+    fn syn_report() -> InputEvent {
+        InputEvent {
+            event_type: EV_SYN,
+            code: SYN_REPORT,
+            value: 0,
+        }
+    }
+
+    fn syn_dropped() -> InputEvent {
+        InputEvent {
+            event_type: EV_SYN,
+            code: SYN_DROPPED,
+            value: 0,
+        }
+    }
+
+    #[test]
+    fn test_exclusive_forwards_unmatched_button() {
+        let (engine, _engine_calls, logger) = make_oneshot_engine("test_trigger");
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        // BTN_LEFT is not in our bindings — should be forwarded
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_LEFT, value: 1 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "Should have forwarded one frame");
+        if let BackendCall::ForwardFrame(ref events) = calls[0] {
+            assert_eq!(events, &vec![(EV_KEY, BTN_LEFT, 1i32)]);
+        } else {
+            panic!("Expected ForwardFrame, got {:?}", calls[0]);
+        }
+    }
+
+    #[test]
+    fn test_exclusive_forwards_mouse_movement() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_X, value: 5 },
+            InputEvent { event_type: EV_REL, code: REL_Y, value: -3 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        if let BackendCall::ForwardFrame(ref events) = calls[0] {
+            assert_eq!(events, &vec![(EV_REL, REL_X, 5i32), (EV_REL, REL_Y, -3i32)]);
+        } else {
+            panic!("Expected ForwardFrame");
+        }
+    }
+
+    #[test]
+    fn test_exclusive_suppresses_matched_button_press() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        // BTN_EXTRA is matched — should NOT be forwarded
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        // No frame should be forwarded (only event was suppressed)
+        assert!(
+            calls.is_empty(),
+            "Matched button should be suppressed, got {:?}",
+            *calls
+        );
+    }
+
+    #[test]
+    fn test_exclusive_suppresses_matched_release() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        // Press in frame 1 — claimed
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            syn_report(),
+        ]);
+
+        // Release in frame 2 — should also be suppressed (cross-frame claim)
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert!(
+            calls.is_empty(),
+            "Both press and release should be suppressed, got {:?}",
+            *calls
+        );
+    }
+
+    #[test]
+    fn test_syn_report_boundaries_preserved() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        // Two frames in one batch
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_X, value: 1 },
+            syn_report(),
+            InputEvent { event_type: EV_REL, code: REL_X, value: 2 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "Should produce two separate forwarded frames");
+    }
+
+    #[test]
+    fn test_non_exclusive_does_not_forward() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        // non-exclusive binding
+        let binding = DeviceBinding {
+            device_match: DeviceMatch::ByName {
+                contains: "test".into(),
+            },
+            button_bindings: vec![ButtonBinding {
+                codes: vec![BTN_EXTRA],
+                code_names: vec!["BTN_EXTRA".into()],
+                trigger_id: "test_trigger".into(),
+                hold_trigger_id: None,
+                hold_threshold_ms: None,
+                layer: None,
+            }],
+            exclusive: false,
+        };
+        // No forwarding backend
+        let mut proc = make_processor(binding, engine, logger, None);
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_X, value: 5 },
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+        ]);
+
+        // No forward_frame calls possible — no backend
+        // This test just verifies it doesn't panic and processes EV_KEY normally
+    }
+
+    #[test]
+    fn test_frame_split_across_poll_batches() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        // First poll: partial frame (no SYN_REPORT yet)
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_X, value: 10 },
+        ]);
+
+        // Nothing forwarded yet
+        assert!(fwd_calls.lock().unwrap().is_empty());
+
+        // Second poll: rest of frame + SYN_REPORT
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_Y, value: -5 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "Frame should be forwarded after SYN_REPORT");
+        if let BackendCall::ForwardFrame(ref events) = calls[0] {
+            assert_eq!(events, &vec![(EV_REL, REL_X, 10i32), (EV_REL, REL_Y, -5i32)]);
+        }
+    }
+
+    #[test]
+    fn test_claimed_press_release_across_polls() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        // Poll 1: press frame
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            syn_report(),
+        ]);
+
+        // Poll 2: release frame (different poll batch)
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 },
+            syn_report(),
+        ]);
+
+        // Both should be suppressed
+        let calls = fwd_calls.lock().unwrap();
+        assert!(
+            calls.is_empty(),
+            "Press and release across polls should both be suppressed, got {:?}",
+            *calls
+        );
+    }
+
+    #[test]
+    fn test_engine_disabled_events_forwarded() {
+        let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
+        logger.set_quiet(true);
+        let backend = MockBackend::new();
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "test_trigger".into(),
+                name: "test_trigger".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action: ActionConfig::AutoClick {
+                    button: MouseButton::Left,
+                    interval_ms: 10,
+                    duration_ms: Some(30),
+                    jitter_ms: 0,
+                    hold_ms: 0,
+                },
+                cooldown_ms: None,
+            }],
+            ..Default::default()
+        };
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            Arc::new(backend),
+            logger.clone(),
+            "test".into(),
+        )));
+        // Engine is DISABLED — events should NOT be claimed
+
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert_eq!(
+            calls.len(),
+            1,
+            "With engine disabled, matched event should be forwarded (not claimed)"
+        );
+    }
+
+    #[test]
+    fn test_syn_dropped_discards_partial_frame() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = exclusive_binding_for("test_trigger");
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+
+        let mut proc = make_processor(
+            binding,
+            engine,
+            logger,
+            Some(Arc::new(fwd_backend)),
+        );
+
+        // Partial frame, then SYN_DROPPED, then a valid frame
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_X, value: 999 },
+            syn_dropped(),
+            InputEvent { event_type: EV_REL, code: REL_X, value: 1 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "Should only forward the valid frame after SYN_DROPPED");
+        if let BackendCall::ForwardFrame(ref events) = calls[0] {
+            assert_eq!(events, &vec![(EV_REL, REL_X, 1i32)]);
+        }
     }
 }

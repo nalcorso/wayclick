@@ -145,7 +145,7 @@ fn main() {
     // Create engine
     let engine = Arc::new(Mutex::new(Engine::new(
         config.clone(),
-        backend,
+        backend.clone(),
         logger.clone(),
         cli.config.clone(),
     )));
@@ -170,8 +170,9 @@ fn main() {
         ipc_server_clone.run();
     });
 
-    // Start EvdevMonitor (stub for now)
+    // Start EvdevMonitor with forwarding backend
     let mut evdev_monitor = EvdevMonitor::new(engine.clone(), logger.clone());
+    evdev_monitor.set_backend(backend);
     evdev_monitor.configure(config.device_bindings.clone());
     evdev_monitor.start();
 

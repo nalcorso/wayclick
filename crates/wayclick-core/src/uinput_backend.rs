@@ -21,6 +21,8 @@ const REL_X: u16 = 0x00;
 const REL_Y: u16 = 0x01;
 const REL_WHEEL: u16 = 0x08;
 const REL_HWHEEL: u16 = 0x06;
+const REL_WHEEL_HI_RES: u16 = 0x0B;
+const REL_HWHEEL_HI_RES: u16 = 0x0C;
 const ABS_X: u16 = 0x00;
 const ABS_Y: u16 = 0x01;
 
@@ -191,8 +193,15 @@ impl InputBackend for UinputBackend {
                 let _ = ui_set_keybit(fd, key as _);
             }
 
-            // Enable relative axes
-            for rel in [REL_X, REL_Y, REL_WHEEL, REL_HWHEEL] {
+            // Enable relative axes (including hi-res scroll for forwarding)
+            for rel in [
+                REL_X,
+                REL_Y,
+                REL_WHEEL,
+                REL_HWHEEL,
+                REL_WHEEL_HI_RES,
+                REL_HWHEEL_HI_RES,
+            ] {
                 ui_set_relbit(fd, rel as _)
                     .map_err(|e| BackendError::Other(format!("UI_SET_RELBIT {}: {}", rel, e)))?;
             }
@@ -332,6 +341,46 @@ impl InputBackend for UinputBackend {
 
     fn name(&self) -> &str {
         "uinput"
+    }
+
+    fn forward_frame(&self, events: &[(u16, u16, i32)]) -> Result<(), BackendError> {
+        let mut guard = self.file.lock().unwrap();
+        let file = guard.as_mut().ok_or(BackendError::NotInitialized)?;
+
+        for &(type_, code, value) in events {
+            let event = InputEvent {
+                time_sec: 0,
+                time_usec: 0,
+                type_,
+                code,
+                value,
+            };
+            // SAFETY: InputEvent is #[repr(C)], pointer and length from valid local reference.
+            let bytes: &[u8] = unsafe {
+                std::slice::from_raw_parts(
+                    &event as *const InputEvent as *const u8,
+                    std::mem::size_of::<InputEvent>(),
+                )
+            };
+            file.write_all(bytes)?;
+        }
+
+        // Terminate frame with SYN_REPORT
+        let syn = InputEvent {
+            time_sec: 0,
+            time_usec: 0,
+            type_: EV_SYN,
+            code: SYN_REPORT,
+            value: 0,
+        };
+        let bytes: &[u8] = unsafe {
+            std::slice::from_raw_parts(
+                &syn as *const InputEvent as *const u8,
+                std::mem::size_of::<InputEvent>(),
+            )
+        };
+        file.write_all(bytes)?;
+        Ok(())
     }
 }
 
