@@ -239,11 +239,9 @@ See [docs/HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) for more examples.
 ```sh
 mise run build      # Build all crates
 mise run test       # Run all tests
-mise run lint       # Clippy with strict warnings
-mise run check      # fmt + clippy + test (full pre-commit check)
-mise run audit      # Security audit of dependencies
+mise run check      # fmt + clippy + test + deny (full pre-commit check)
 mise run bench      # Run Criterion benchmarks
-mise run bench-report  # Run benchmarks + save timestamped JSON report
+mise run fuzz       # Run fuzz tests (requires nightly)
 ```
 
 ### Without mise
@@ -272,7 +270,7 @@ Criterion.rs micro-benchmarks cover the three critical paths:
 mise run bench-quick
 
 # Full benchmark suite with saved report
-mise run bench-report    # → bench-results/<timestamp>-<commit>.json
+./scripts/bench-report.sh    # → bench-results/<timestamp>-<commit>.json
 ```
 
 Reports include git commit, system info (CPU model, governor, memory), and per-benchmark confidence intervals.
@@ -318,7 +316,7 @@ Copy an example to `~/.config/wayclick/init.lua` to try it out.
 - **Least privilege** — runs as your user, needs only `wayclick` + `input` groups
 - **Fuzz-tested** — config loading, IPC framing, and device matching are all
   fuzz targets
-- **Supply chain** — `cargo audit` and `cargo deny` available via `mise run audit` / `mise run deny`
+- **Supply chain** — `cargo deny` runs as part of `mise run check`
 
 See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model.
 

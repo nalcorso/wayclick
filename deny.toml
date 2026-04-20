@@ -5,6 +5,14 @@
 version = 2
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
+ignore = [
+    # paste is unmaintained but only used transitively by ratatui;
+    # will be resolved when ratatui updates its dependency tree.
+    "RUSTSEC-2024-0436",
+    # macroquad soundness issues; used only in the standalone input-viz
+    # testing tool, not in the daemon. No fix available upstream.
+    "RUSTSEC-2025-0035",
+]
 
 [licenses]
 version = 2

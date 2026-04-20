@@ -12,7 +12,7 @@ cd wayclick
 
 ```sh
 mise run build         # Build all crates
-mise run check         # Run fmt + clippy + test (full pre-commit check)
+mise run check         # Run fmt + clippy + test + deny (full pre-commit check)
 ```
 
 ### Without mise

@@ -14,33 +14,19 @@ run = "cargo build --workspace --release"
 description = "Run all tests"
 run = "cargo test --workspace"
 
-[tasks.lint]
-description = "Run clippy with strict warnings"
-run = "cargo clippy --workspace -- -D warnings"
+[tasks.check]
+description = "Run all CI checks (fmt, clippy, test, deny)"
+run = """
+set -e
+echo "=== fmt ===" && cargo fmt --all -- --check
+echo "=== clippy ===" && cargo clippy --workspace -- -D warnings
+echo "=== test ===" && cargo test --workspace
+echo "=== deny ===" && cargo deny check
+"""
 
 [tasks.fmt]
 description = "Format all code"
 run = "cargo fmt --all"
-
-[tasks.fmt-check]
-description = "Check formatting without modifying files"
-run = "cargo fmt --all -- --check"
-
-[tasks.audit]
-description = "Check dependencies for known vulnerabilities"
-run = "cargo audit"
-
-[tasks.deny]
-description = "Check dependency licenses and advisories"
-run = "cargo deny check"
-
-[tasks.check]
-description = "Run all CI checks (fmt, clippy, test, audit)"
-depends = ["fmt-check", "lint", "test"]
-
-[tasks.dev]
-description = "Quick development setup"
-run = "./scripts/dev.sh"
 
 [tasks.fuzz]
 description = "Run fuzz tests (requires nightly)"
@@ -59,6 +45,6 @@ run = "cargo bench --features bench-internals"
 description = "Quick benchmark smoke test (reduced samples)"
 run = "cargo bench --features bench-internals -- --sample-size 10 --warm-up-time 1 --measurement-time 3"
 
-[tasks.bench-report]
-description = "Run benchmarks and save timestamped JSON report"
-run = "./scripts/bench-report.sh"
+[tasks.dev]
+description = "Quick development setup"
+run = "./scripts/dev.sh"
