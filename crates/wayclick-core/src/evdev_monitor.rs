@@ -488,6 +488,7 @@ mod tests {
         DeviceBinding {
             device_match: dm,
             button_bindings: vec![],
+            scroll_bindings: vec![],
             exclusive: false,
         }
     }
@@ -637,6 +638,7 @@ mod tests {
                 hold_threshold_ms: None,
                 layer: None,
             }],
+            scroll_bindings: vec![],
             exclusive: false,
         }
     }
@@ -735,6 +737,7 @@ mod tests {
                 hold_threshold_ms: None,
                 layer: None,
             }],
+            scroll_bindings: vec![],
             exclusive: false,
         };
 
@@ -825,6 +828,7 @@ mod tests {
                 hold_threshold_ms: None,
                 layer: None,
             }],
+            scroll_bindings: vec![],
             exclusive: true,
         }
     }
@@ -1008,6 +1012,7 @@ mod tests {
                 hold_threshold_ms: None,
                 layer: None,
             }],
+            scroll_bindings: vec![],
             exclusive: false,
         };
         // No forwarding backend

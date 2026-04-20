@@ -742,6 +742,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             builder.device_bindings.push(DeviceBinding {
                 device_match,
                 button_bindings,
+                scroll_bindings: vec![],
                 exclusive,
             });
 
@@ -778,6 +779,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                     hold_threshold_ms: None,
                     layer: None,
                 }],
+                scroll_bindings: vec![],
                 exclusive: false,
             });
 

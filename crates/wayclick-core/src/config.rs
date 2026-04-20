@@ -264,7 +264,16 @@ pub struct ButtonBinding {
 pub struct DeviceBinding {
     pub device_match: DeviceMatch,
     pub button_bindings: Vec<ButtonBinding>,
+    pub scroll_bindings: Vec<ScrollBinding>,
     pub exclusive: bool,
+}
+
+/// Binding that maps a scroll direction to a trigger.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScrollBinding {
+    pub direction: ScrollDirection,
+    pub trigger_id: String,
+    pub layer: Option<String>,
 }
 
 /// Rule for automatic profile/layer switching based on active window.
@@ -481,6 +490,17 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
                 if !trigger_ids.contains(hold_id.as_str()) {
                     errors.push(ConfigError::UnknownTriggerRef(hold_id.clone()));
                 }
+            }
+        }
+        for scroll in &binding.scroll_bindings {
+            if !trigger_ids.contains(scroll.trigger_id.as_str()) {
+                errors.push(ConfigError::UnknownTriggerRef(scroll.trigger_id.clone()));
+            }
+            if !binding.exclusive {
+                errors.push(ConfigError::Validation(format!(
+                    "scroll binding for trigger '{}' requires exclusive=true",
+                    scroll.trigger_id
+                )));
             }
         }
     }
@@ -742,6 +762,7 @@ mod tests {
                     hold_threshold_ms: None,
                     layer: None,
                 }],
+                scroll_bindings: vec![],
                 exclusive: false,
             }],
             profile_rules: vec![],
@@ -831,5 +852,84 @@ mod tests {
         assert!(result.is_err());
         let errors = result.unwrap_err();
         assert!(errors.iter().any(|e| e.to_string().contains("sub-actions")));
+    }
+
+    #[test]
+    fn test_scroll_binding_creation() {
+        let sb = ScrollBinding {
+            direction: ScrollDirection::Up,
+            trigger_id: "click".into(),
+            layer: None,
+        };
+        assert_eq!(sb.direction, ScrollDirection::Up);
+        assert_eq!(sb.trigger_id, "click");
+    }
+
+    #[test]
+    fn test_scroll_binding_matches_direction() {
+        let sb = ScrollBinding {
+            direction: ScrollDirection::Up,
+            trigger_id: "click".into(),
+            layer: None,
+        };
+        assert_eq!(sb.direction, ScrollDirection::Up);
+        assert_ne!(sb.direction, ScrollDirection::Down);
+    }
+
+    #[test]
+    fn test_validate_scroll_binding_requires_exclusive() {
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "click".into(),
+                name: "Click".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action: ActionConfig::NoOp,
+                cooldown_ms: None,
+            }],
+            device_bindings: vec![DeviceBinding {
+                device_match: DeviceMatch::ByName {
+                    contains: "test".into(),
+                },
+                button_bindings: vec![],
+                scroll_bindings: vec![ScrollBinding {
+                    direction: ScrollDirection::Up,
+                    trigger_id: "click".into(),
+                    layer: None,
+                }],
+                exclusive: false, // should fail
+            }],
+            ..Config::default()
+        };
+        let errs = validate_config(&config).unwrap_err();
+        assert!(errs.iter().any(|e| e.to_string().contains("exclusive")));
+    }
+
+    #[test]
+    fn test_validate_scroll_binding_ok_with_exclusive() {
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "click".into(),
+                name: "Click".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action: ActionConfig::NoOp,
+                cooldown_ms: None,
+            }],
+            device_bindings: vec![DeviceBinding {
+                device_match: DeviceMatch::ByName {
+                    contains: "test".into(),
+                },
+                button_bindings: vec![],
+                scroll_bindings: vec![ScrollBinding {
+                    direction: ScrollDirection::Up,
+                    trigger_id: "click".into(),
+                    layer: None,
+                }],
+                exclusive: true,
+            }],
+            ..Config::default()
+        };
+        assert!(validate_config(&config).is_ok());
     }
 }

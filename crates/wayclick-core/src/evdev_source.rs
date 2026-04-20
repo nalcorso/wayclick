@@ -42,6 +42,36 @@ pub const EV_ABS: u16 = 0x03;
 pub const SYN_REPORT: u16 = 0x00;
 pub const SYN_DROPPED: u16 = 0x01;
 
+// REL axis codes
+pub const REL_WHEEL: u16 = 0x08;
+pub const REL_HWHEEL: u16 = 0x06;
+pub const REL_WHEEL_HI_RES: u16 = 0x0B;
+pub const REL_HWHEEL_HI_RES: u16 = 0x0C;
+
+use crate::config::ScrollDirection;
+
+/// Classify a REL event as a scroll direction and magnitude.
+/// Returns None for non-scroll REL codes (e.g. REL_X, REL_Y).
+pub fn classify_scroll(code: u16, value: i32) -> Option<(ScrollDirection, u32)> {
+    match code {
+        REL_WHEEL => {
+            if value > 0 {
+                Some((ScrollDirection::Up, value as u32))
+            } else {
+                Some((ScrollDirection::Down, (-value) as u32))
+            }
+        }
+        REL_HWHEEL => {
+            if value > 0 {
+                Some((ScrollDirection::Right, value as u32))
+            } else {
+                Some((ScrollDirection::Left, (-value) as u32))
+            }
+        }
+        _ => None,
+    }
+}
+
 pub trait InputSource: Send {
     fn device_info(&self) -> DeviceInfo;
     fn poll_events(&mut self, timeout: Duration) -> Result<Vec<InputEvent>, SourceError>;
@@ -304,4 +334,64 @@ pub fn enumerate_devices() -> Vec<DeviceInfo> {
 /// libc bindings we need
 mod libc {
     pub use ::libc::*;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_classify_scroll_wheel_up() {
+        assert_eq!(
+            classify_scroll(REL_WHEEL, 1),
+            Some((ScrollDirection::Up, 1))
+        );
+    }
+
+    #[test]
+    fn test_classify_scroll_wheel_down() {
+        assert_eq!(
+            classify_scroll(REL_WHEEL, -1),
+            Some((ScrollDirection::Down, 1))
+        );
+    }
+
+    #[test]
+    fn test_classify_scroll_magnitude() {
+        assert_eq!(
+            classify_scroll(REL_WHEEL, 3),
+            Some((ScrollDirection::Up, 3))
+        );
+        assert_eq!(
+            classify_scroll(REL_WHEEL, -5),
+            Some((ScrollDirection::Down, 5))
+        );
+    }
+
+    #[test]
+    fn test_classify_scroll_hwheel() {
+        assert_eq!(
+            classify_scroll(REL_HWHEEL, 1),
+            Some((ScrollDirection::Right, 1))
+        );
+        assert_eq!(
+            classify_scroll(REL_HWHEEL, -1),
+            Some((ScrollDirection::Left, 1))
+        );
+    }
+
+    #[test]
+    fn test_classify_scroll_non_scroll_code() {
+        // REL_X (0x00) is not a scroll axis
+        assert_eq!(classify_scroll(0x00, 5), None);
+        // REL_Y (0x01) is not a scroll axis
+        assert_eq!(classify_scroll(0x01, -3), None);
+    }
+
+    #[test]
+    fn test_classify_scroll_hi_res_not_classified() {
+        // Hi-res scroll events are not classified — they are suppressed alongside standard events
+        assert_eq!(classify_scroll(REL_WHEEL_HI_RES, 120), None);
+        assert_eq!(classify_scroll(REL_HWHEEL_HI_RES, -120), None);
+    }
 }

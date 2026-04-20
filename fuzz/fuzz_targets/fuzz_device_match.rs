@@ -36,6 +36,7 @@ fuzz_target!(|data: &[u8]| {
             contains: name.clone(),
         },
         button_bindings: vec![],
+        scroll_bindings: vec![],
         exclusive: false,
     };
     let _ = match_device(&info, &binding_name);
@@ -46,6 +47,7 @@ fuzz_target!(|data: &[u8]| {
             product: product_id,
         },
         button_bindings: vec![],
+        scroll_bindings: vec![],
         exclusive: false,
     };
     let _ = match_device(&info, &binding_vid);
@@ -63,6 +65,7 @@ fuzz_target!(|data: &[u8]| {
             ],
         },
         button_bindings: vec![],
+        scroll_bindings: vec![],
         exclusive: false,
     };
     let _ = match_device(&info, &binding_any);
