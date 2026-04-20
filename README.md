@@ -289,6 +289,16 @@ Reports include git commit, system info (CPU model, governor, memory), and per-b
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full module breakdown
 and threading model.
 
+## Examples
+
+The [`examples/`](examples/) directory contains ready-to-use Lua configs:
+
+- **[morse_clicker.lua](examples/morse_clicker.lua)** — clicks mouse morse code
+  for any word using a full A–Z + 0–9 dictionary. Demo spells "banana" for the
+  Revolution Idle achievement.
+
+Copy an example to `~/.config/wayclick/init.lua` to try it out.
+
 ## Security
 
 - **No network access** — local-only, Unix socket IPC with `0600` permissions
@@ -314,6 +324,7 @@ See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model.
 | [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development workflow, adding actions, code style |
 | [HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) | Hyprland keybinding examples |
 | [extras/waybar/](extras/waybar/) | Waybar status module with themes |
+| [examples/](examples/) | Example Lua configurations |
 
 ## Contributing
 
