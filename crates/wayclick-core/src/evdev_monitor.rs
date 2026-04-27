@@ -267,6 +267,21 @@ impl DeviceProcessor {
         }
     }
 
+    /// Fire a trigger event through the engine and log it.
+    /// `press` is `true` for activation and `false` for deactivation.
+    fn fire_trigger(&self, trigger_id: &str, code_name: &str, press: bool, log_msg: &str) {
+        self.logger.debug(format!(
+            "Button {} {}, {} trigger '{}'",
+            code_name,
+            if press { "pressed" } else { "released" },
+            log_msg,
+            trigger_id
+        ));
+        with_engine_events(&self.engine, |eng| {
+            let _ = eng.trigger_event(trigger_id, press);
+        });
+    }
+
     /// Process a batch of raw evdev events.
     /// In exclusive mode: accumulates events into frames (SYN_REPORT-delimited),
     /// claims matched events, and forwards the rest.
@@ -312,31 +327,13 @@ impl DeviceProcessor {
                             let code_name = bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
                             match event.value {
                                 1 if bb.on == TriggerEdge::Press => {
-                                    self.logger.debug(format!(
-                                        "Button {} pressed, firing trigger '{}'",
-                                        code_name, bb.trigger_id
-                                    ));
-                                    with_engine_events(&self.engine, |eng| {
-                                        let _ = eng.trigger_event(&bb.trigger_id, true);
-                                    });
+                                    self.fire_trigger(&bb.trigger_id, code_name, true, "firing");
                                 }
                                 0 if bb.on == TriggerEdge::Press => {
-                                    self.logger.debug(format!(
-                                        "Button {} released, deactivating trigger '{}'",
-                                        code_name, bb.trigger_id
-                                    ));
-                                    with_engine_events(&self.engine, |eng| {
-                                        let _ = eng.trigger_event(&bb.trigger_id, false);
-                                    });
+                                    self.fire_trigger(&bb.trigger_id, code_name, false, "deactivating");
                                 }
                                 0 if bb.on == TriggerEdge::Release => {
-                                    self.logger.debug(format!(
-                                        "Button {} released, firing trigger '{}'",
-                                        code_name, bb.trigger_id
-                                    ));
-                                    with_engine_events(&self.engine, |eng| {
-                                        let _ = eng.trigger_event(&bb.trigger_id, true);
-                                    });
+                                    self.fire_trigger(&bb.trigger_id, code_name, true, "firing on-release");
                                 }
                                 _ => {}
                             }
@@ -400,8 +397,7 @@ impl DeviceProcessor {
                                 let triggered =
                                     with_engine_events(&self.engine, |eng| {
                                         eng.trigger_event(&bb.trigger_id, true).is_ok()
-                                    });
-                                if triggered {
+                                    });                                if triggered {
                                     self.active_claims.insert(binding_idx, bb.swallow);
                                     if bb.swallow {
                                         for &c in &bb.codes {
@@ -442,14 +438,8 @@ impl DeviceProcessor {
                                 }
                                 let code_name =
                                     bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
-                                self.logger.debug(format!(
-                                    "Button {} released, firing on=release trigger '{}'",
-                                    code_name, bb.trigger_id
-                                ));
                                 // swallow=true is forbidden for on=Release (validated at load time)
-                                with_engine_events(&self.engine, |eng| {
-                                    let _ = eng.trigger_event(&bb.trigger_id, true);
-                                });
+                                self.fire_trigger(&bb.trigger_id, code_name, true, "firing on-release");
                             }
                         }
 
@@ -472,13 +462,7 @@ impl DeviceProcessor {
                             if let Binding::Button(ref bb) = self.binding.bindings[claim_idx] {
                                 let code_name =
                                     bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
-                                self.logger.debug(format!(
-                                    "Button {} released, deactivating trigger '{}'",
-                                    code_name, bb.trigger_id
-                                ));
-                                with_engine_events(&self.engine, |eng| {
-                                    let _ = eng.trigger_event(&bb.trigger_id, false);
-                                });
+                                self.fire_trigger(&bb.trigger_id, code_name, false, "deactivating");
                                 if swallow {
                                     for &c in &bb.codes {
                                         released_swallowed_codes.insert(c);

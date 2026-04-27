@@ -919,10 +919,7 @@ fn do_keystroke(
     // Press modifiers
     for &mod_code in modifier_codes {
         if let Err(e) = backend.key_press(mod_code) {
-            // Best-effort release already-pressed modifiers
-            for &undo in modifier_codes[..pressed].iter().rev() {
-                let _ = backend.key_release(undo);
-            }
+            release_modifiers(backend, &modifier_codes[..pressed]);
             return Err(e);
         }
         pressed += 1;
@@ -930,9 +927,7 @@ fn do_keystroke(
 
     // Press the main key
     if let Err(e) = backend.key_press(key_code) {
-        for &undo in modifier_codes[..pressed].iter().rev() {
-            let _ = backend.key_release(undo);
-        }
+        release_modifiers(backend, &modifier_codes[..pressed]);
         return Err(e);
     }
 
@@ -947,6 +942,13 @@ fn do_keystroke(
     }
 
     Ok(())
+}
+
+/// Best-effort release of already-pressed modifier keys (in reverse press order).
+fn release_modifiers(backend: &Arc<dyn InputBackend>, pressed: &[u32]) {
+    for &undo in pressed.iter().rev() {
+        let _ = backend.key_release(undo);
+    }
 }
 
 fn jittered_interval(interval_ms: u32, jitter_ms: u32) -> u32 {
