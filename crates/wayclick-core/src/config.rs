@@ -756,8 +756,7 @@ pub fn default_socket_path() -> PathBuf {
     } else {
         PathBuf::from("/tmp").join(format!(
             "wayclick-{}.sock",
-            // SAFETY: getuid() is always safe — it reads the real UID with no side effects.
-            unsafe { libc::getuid() }
+            nix::unistd::getuid().as_raw()
         ))
     }
 }
@@ -767,14 +766,6 @@ pub fn effective_socket_path(config: &Config) -> PathBuf {
     match &config.options.socket_path {
         Some(p) if !p.is_empty() => PathBuf::from(p),
         _ => default_socket_path(),
-    }
-}
-
-// Avoid direct libc dependency; use nix instead for getuid if needed,
-// but for socket path we can use a simpler approach
-mod libc {
-    extern "C" {
-        pub fn getuid() -> u32;
     }
 }
 

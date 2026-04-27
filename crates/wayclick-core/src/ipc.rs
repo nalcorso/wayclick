@@ -379,7 +379,7 @@ fn handle_client(
     let stream_write = match stream_read.try_clone() {
         Ok(s) => s,
         Err(e) => {
-            logger.debug(format!("IPC stream clone error: {}", e));
+            logger.warn(format!("IPC stream clone failed, closing connection: {}", e));
             return;
         }
     };
