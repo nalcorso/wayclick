@@ -1,3 +1,4 @@
+use crate::MutexExt;
 use std::collections::VecDeque;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -129,7 +130,7 @@ impl Logger {
             }
         }
 
-        let mut entries = self.entries.lock().unwrap();
+        let mut entries = self.entries.lock_or_recover();
         if entries.len() >= self.capacity {
             entries.pop_front();
         }
@@ -157,7 +158,7 @@ impl Logger {
     }
 
     pub fn recent(&self, n: usize) -> Vec<LogEntry> {
-        let entries = self.entries.lock().unwrap();
+        let entries = self.entries.lock_or_recover();
         let start = if entries.len() > n {
             entries.len() - n
         } else {
@@ -167,7 +168,7 @@ impl Logger {
     }
 
     pub fn all_entries(&self) -> Vec<LogEntry> {
-        self.entries.lock().unwrap().iter().cloned().collect()
+        self.entries.lock_or_recover().iter().cloned().collect()
     }
 }
 

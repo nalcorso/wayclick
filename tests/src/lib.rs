@@ -18,6 +18,7 @@ mod integration {
     use std::time::Duration;
 
     use wayclick_core::config::Config;
+    use wayclick_core::engine::with_engine_events;
     use wayclick_core::ipc::decode_frame;
     use wayclick_core::logger::{LogLevel, Logger};
     use wayclick_core::lua_api::load_config;
@@ -187,7 +188,7 @@ mod integration {
     #[test]
     fn test_register_and_list_dynamic_trigger() {
         let daemon = TestDaemon::new(Config::default());
-        daemon.engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&daemon.engine, |eng| eng.set_enabled(true));
 
         let mut sock = daemon.connect();
 

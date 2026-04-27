@@ -6,6 +6,7 @@
 use crate::config::{MouseButton, ScrollDirection};
 use crate::input_backend::{BackendError, InputBackend};
 use crate::logger::Logger;
+use crate::MutexExt;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::unix::io::AsRawFd;
@@ -140,7 +141,7 @@ impl UinputBackend {
                 std::mem::size_of::<InputEvent>(),
             )
         };
-        let mut guard = self.file.lock().unwrap();
+        let mut guard = self.file.lock_or_recover();
         let file = guard.as_mut().ok_or(BackendError::NotInitialized)?;
         file.write_all(bytes)?;
         Ok(())
@@ -266,7 +267,7 @@ impl InputBackend for UinputBackend {
         // Small delay to let the device register
         std::thread::sleep(std::time::Duration::from_millis(100));
 
-        *self.file.lock().unwrap() = Some(file);
+        *self.file.lock_or_recover() = Some(file);
         self.logger
             .info("UinputBackend initialized: wayclick-virtual-pointer");
         Ok(())
@@ -344,7 +345,7 @@ impl InputBackend for UinputBackend {
     }
 
     fn forward_frame(&self, events: &[(u16, u16, i32)]) -> Result<(), BackendError> {
-        let mut guard = self.file.lock().unwrap();
+        let mut guard = self.file.lock_or_recover();
         let file = guard.as_mut().ok_or(BackendError::NotInitialized)?;
 
         for &(type_, code, value) in events {
@@ -386,7 +387,7 @@ impl InputBackend for UinputBackend {
 
 impl Drop for UinputBackend {
     fn drop(&mut self) {
-        let guard = self.file.lock().unwrap();
+        let guard = self.file.lock_or_recover();
         if let Some(ref file) = *guard {
             // SAFETY: fd is valid (checked above). UI_DEV_DESTROY is a simple ioctl that
             // tears down the virtual device. Errors are intentionally ignored during drop.

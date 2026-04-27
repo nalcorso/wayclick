@@ -486,6 +486,13 @@ impl Drop for Engine {
 /// Events are collected inside the lock and published *after* the lock is released, which
 /// prevents lock-order inversions: no subscriber callback can deadlock by re-acquiring the
 /// engine lock while this function is on the call stack.
+///
+/// # Panic policy
+///
+/// The engine lock uses `unwrap()` intentionally. If the engine panics mid-mutation its
+/// coupled fields (`state`, `config`, `pending_events`, etc.) may be inconsistent; the correct
+/// response is a clean process exit, not continued operation on potentially corrupted state.
+/// Peripheral mutexes (logger, event bus, device tracker) use `lock_or_recover()` instead.
 pub fn with_engine_events<T>(engine: &Arc<Mutex<Engine>>, f: impl FnOnce(&mut Engine) -> T) -> T {
     let (result, events, bus) = {
         let mut guard = engine.lock().unwrap();
@@ -988,6 +995,7 @@ mod tests {
     use super::*;
     use crate::input_backend::{BackendCall, MockBackend};
     use crate::logger::LogLevel;
+    use crate::MutexExt;
     use std::sync::Mutex;
 
     fn test_engine(triggers: Vec<TriggerBinding>) -> (Engine, Arc<Mutex<Vec<BackendCall>>>) {
@@ -1032,7 +1040,7 @@ mod tests {
         // Wait for some clicks
         thread::sleep(Duration::from_millis(50));
 
-        let call_count = calls.lock().unwrap().len();
+        let call_count = calls.lock_or_recover().len();
         assert!(call_count > 0, "Expected clicks, got none");
     }
 
@@ -1048,7 +1056,7 @@ mod tests {
         engine.trigger_event("test", true).unwrap();
         thread::sleep(Duration::from_millis(30));
 
-        let count_before_release = calls.lock().unwrap().len();
+        let count_before_release = calls.lock_or_recover().len();
         assert!(
             count_before_release > 0,
             "Toggle should start clicking on press"
@@ -1058,7 +1066,7 @@ mod tests {
         engine.trigger_event("test", false).unwrap();
         thread::sleep(Duration::from_millis(30));
 
-        let count_after_release = calls.lock().unwrap().len();
+        let count_after_release = calls.lock_or_recover().len();
         assert!(
             count_after_release > count_before_release,
             "Toggle must stay active after release: had {} clicks before release, {} after",
@@ -1079,11 +1087,11 @@ mod tests {
 
         // Stop
         engine.trigger_event("test", true).unwrap();
-        let count_after_stop = calls.lock().unwrap().len();
+        let count_after_stop = calls.lock_or_recover().len();
 
         // Wait to ensure no more clicks
         thread::sleep(Duration::from_millis(30));
-        let count_later = calls.lock().unwrap().len();
+        let count_later = calls.lock_or_recover().len();
         assert_eq!(count_after_stop, count_later);
     }
 
@@ -1099,12 +1107,12 @@ mod tests {
 
         // Release
         engine.trigger_event("test", false).unwrap();
-        let count_after_release = calls.lock().unwrap().len();
+        let count_after_release = calls.lock_or_recover().len();
         assert!(count_after_release > 0);
 
         // Ensure stopped
         thread::sleep(Duration::from_millis(30));
-        let count_later = calls.lock().unwrap().len();
+        let count_later = calls.lock_or_recover().len();
         assert_eq!(count_after_release, count_later);
     }
 
@@ -1128,7 +1136,7 @@ mod tests {
         engine.set_enabled(true);
 
         engine.trigger_event("test", true).unwrap();
-        let count = calls.lock().unwrap().len();
+        let count = calls.lock_or_recover().len();
         assert!(count > 0, "OneShot should have produced clicks");
     }
 
@@ -1173,9 +1181,9 @@ mod tests {
         let new_config = Config::default();
         engine.apply_config(new_config);
 
-        let count_after = calls.lock().unwrap().len();
+        let count_after = calls.lock_or_recover().len();
         thread::sleep(Duration::from_millis(30));
-        let count_later = calls.lock().unwrap().len();
+        let count_later = calls.lock_or_recover().len();
         assert_eq!(count_after, count_later);
     }
 
@@ -1281,7 +1289,7 @@ mod tests {
         engine.set_enabled(true);
 
         engine.trigger_event("move", true).unwrap();
-        let recorded = calls.lock().unwrap();
+        let recorded = calls.lock_or_recover();
         assert!(recorded.contains(&BackendCall::MoveAbsolute(1000, 2000)));
     }
 
@@ -1305,7 +1313,7 @@ mod tests {
         engine.set_enabled(true);
 
         engine.trigger_event("click", true).unwrap();
-        let recorded = calls.lock().unwrap();
+        let recorded = calls.lock_or_recover();
         assert!(recorded.contains(&BackendCall::MoveAbsolute(500, 300)));
         assert!(recorded.contains(&BackendCall::Click(MouseButton::Left)));
     }
@@ -1356,7 +1364,7 @@ mod tests {
         engine.set_enabled(true);
         engine.trigger_event("ks", true).unwrap();
 
-        let recorded = calls.lock().unwrap().clone();
+        let recorded = calls.lock_or_recover().clone();
         assert_eq!(
             recorded,
             vec![
@@ -1377,7 +1385,7 @@ mod tests {
         engine.set_enabled(true);
         engine.trigger_event("ks", true).unwrap();
 
-        let recorded = calls.lock().unwrap().clone();
+        let recorded = calls.lock_or_recover().clone();
         assert_eq!(
             recorded,
             vec![BackendCall::KeyPress(57), BackendCall::KeyRelease(57),],
@@ -1408,7 +1416,7 @@ mod tests {
         engine.set_enabled(true);
         engine.trigger_event("kp", true).unwrap();
 
-        let recorded = calls.lock().unwrap().clone();
+        let recorded = calls.lock_or_recover().clone();
         assert_eq!(
             &recorded[..4],
             &[
@@ -1428,7 +1436,7 @@ mod tests {
         engine.set_enabled(true);
         engine.trigger_event("ks", true).unwrap();
 
-        let recorded = calls.lock().unwrap().clone();
+        let recorded = calls.lock_or_recover().clone();
         // Regardless of hold_ms, the press/release sequence must be complete
         assert_eq!(
             recorded,

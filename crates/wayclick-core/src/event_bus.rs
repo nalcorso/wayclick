@@ -1,3 +1,4 @@
+use crate::MutexExt;
 use serde::Serialize;
 use std::sync::mpsc;
 use std::sync::Mutex;
@@ -155,7 +156,7 @@ impl EventBus {
     /// Publish an event to all matching subscribers.
     /// Subscribers whose channel is full or closed are removed.
     pub fn publish(&self, event: &Event) {
-        let mut subs = self.subscribers.lock().unwrap();
+        let mut subs = self.subscribers.lock_or_recover();
         subs.retain(|entry| {
             if !entry.accepts(event) {
                 return true; // keep — not targeting this subscriber
@@ -166,7 +167,7 @@ impl EventBus {
 
     /// Remove all subscribers (called on shutdown).
     pub fn clear(&self) {
-        self.subscribers.lock().unwrap().clear();
+        self.subscribers.lock_or_recover().clear();
     }
 }
 
@@ -218,7 +219,7 @@ mod tests {
         drop(rx); // simulate connection close
         // Should not panic; dead subscriber pruned on next publish
         bus.publish(&Event::config_reloaded());
-        assert_eq!(bus.subscribers.lock().unwrap().len(), 0);
+        assert_eq!(bus.subscribers.lock_or_recover().len(), 0);
     }
 
     #[test]
@@ -230,7 +231,7 @@ mod tests {
             bus.publish(&Event::trigger_activated(format!("t{}", i)));
         }
         // After overflow, subscriber is removed
-        assert_eq!(bus.subscribers.lock().unwrap().len(), 0);
+        assert_eq!(bus.subscribers.lock_or_recover().len(), 0);
     }
 
     #[test]

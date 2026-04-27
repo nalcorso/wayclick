@@ -6,6 +6,7 @@ mod tests {
 
     use serde_json::json;
     use wayclick_core::config::Config;
+    use wayclick_core::engine::with_engine_events;
 
     use crate::helpers::{ipc_call_raw, poll_until, TestDaemon};
 
@@ -179,7 +180,7 @@ mod tests {
         );
 
         // Reload config at the engine level
-        daemon.engine.lock().unwrap().apply_config(Config::default());
+        with_engine_events(&daemon.engine, |eng| eng.apply_config(Config::default()));
 
         // Trigger should still be present
         let snaps = daemon.engine.lock().unwrap().triggers_snapshot();

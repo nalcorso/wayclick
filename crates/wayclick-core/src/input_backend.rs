@@ -1,5 +1,6 @@
 use crate::config::{MouseButton, ScrollDirection};
 use crate::logger::Logger;
+use crate::MutexExt;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 
@@ -138,7 +139,7 @@ impl MockBackend {
     }
 
     pub fn get_calls(&self) -> Vec<BackendCall> {
-        self.calls.lock().unwrap().clone()
+        self.calls.lock_or_recover().clone()
     }
 }
 
@@ -148,7 +149,7 @@ impl InputBackend for MockBackend {
     }
 
     fn click(&self, button: MouseButton) -> Result<(), BackendError> {
-        self.calls.lock().unwrap().push(BackendCall::Click(button));
+        self.calls.lock_or_recover().push(BackendCall::Click(button));
         Ok(())
     }
 

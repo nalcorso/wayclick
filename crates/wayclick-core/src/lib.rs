@@ -8,4 +8,7 @@ pub mod input_backend;
 pub mod ipc;
 pub mod logger;
 pub mod lua_api;
+pub mod mutex_ext;
 pub mod uinput_backend;
+
+pub use mutex_ext::MutexExt;

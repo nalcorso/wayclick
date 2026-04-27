@@ -39,7 +39,7 @@ mod tests {
             ..Config::default()
         };
         let daemon = TestDaemon::new(config);
-        daemon.engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&daemon.engine, |eng| eng.set_enabled(true));
 
         let mut sock = daemon.connect();
         let resp = ipc_call_raw(&mut sock, 1, "subscribe", json!({}));

@@ -8,6 +8,7 @@ use crate::evdev_source::{
 };
 use crate::input_backend::InputBackend;
 use crate::logger::Logger;
+use crate::MutexExt;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -82,7 +83,7 @@ impl EvdevMonitor {
                 // Scan for new devices
                 let devices = evdev_source::enumerate_devices();
                 for dev in &devices {
-                    let already_tracked = tracked.lock().unwrap().contains_key(&dev.path);
+                    let already_tracked = tracked.lock_or_recover().contains_key(&dev.path);
                     if already_tracked {
                         continue;
                     }
@@ -93,7 +94,7 @@ impl EvdevMonitor {
                                 "Hotplug: new device '{}' at {:?} matches binding",
                                 dev.name, dev.path
                             ));
-                            tracked.lock().unwrap().insert(dev.path.clone(), ());
+                            tracked.lock_or_recover().insert(dev.path.clone(), ());
                             spawn_device_thread(DeviceThreadParams {
                                 path: dev.path.clone(),
                                 exclusive: binding.exclusive,
@@ -162,7 +163,7 @@ impl EvdevMonitor {
             let _ = thread.join();
         }
 
-        self.tracked_devices.lock().unwrap().clear();
+        self.tracked_devices.lock_or_recover().clear();
         self.logger.info("EvdevMonitor: stopped");
     }
 }
@@ -194,7 +195,7 @@ fn spawn_device_thread(params: DeviceThreadParams) -> JoinHandle<()> {
             Ok(s) => s,
             Err(e) => {
                 logger.warn(format!("Failed to open {:?}: {}", path, e));
-                tracked.lock().unwrap().remove(&path);
+                tracked.lock_or_recover().remove(&path);
                 return;
             }
         };
@@ -215,12 +216,12 @@ fn spawn_device_thread(params: DeviceThreadParams) -> JoinHandle<()> {
                 }
                 Err(crate::evdev_source::SourceError::Disconnected) => {
                     logger.warn(format!("Device {:?} disconnected", path));
-                    tracked.lock().unwrap().remove(&path);
+                    tracked.lock_or_recover().remove(&path);
                     break;
                 }
                 Err(e) => {
                     logger.warn(format!("Read error on {:?}: {}", path, e));
-                    tracked.lock().unwrap().remove(&path);
+                    tracked.lock_or_recover().remove(&path);
                     break;
                 }
             }
@@ -760,7 +761,7 @@ mod tests {
             Arc::new(EventBus::new()),
             "test".into(),
         )));
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
         (engine, calls, logger)
     }
 
@@ -807,7 +808,7 @@ mod tests {
         proc.process_events(&press);
 
         thread::sleep(Duration::from_millis(50));
-        let clicks_during_hold = calls.lock().unwrap().len();
+        let clicks_during_hold = calls.lock_or_recover().len();
         assert!(
             clicks_during_hold > 0,
             "Hold trigger should produce clicks while held"
@@ -822,10 +823,10 @@ mod tests {
         proc.process_events(&release);
 
         thread::sleep(Duration::from_millis(30));
-        let clicks_at_release = calls.lock().unwrap().len();
+        let clicks_at_release = calls.lock_or_recover().len();
 
         thread::sleep(Duration::from_millis(50));
-        let clicks_after = calls.lock().unwrap().len();
+        let clicks_after = calls.lock_or_recover().len();
 
         assert_eq!(
             clicks_at_release, clicks_after,
@@ -864,7 +865,7 @@ mod tests {
             Arc::new(EventBus::new()),
             "test".into(),
         )));
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
 
         let binding = DeviceBinding {
             device_match: DeviceMatch::ByName {
@@ -893,7 +894,7 @@ mod tests {
         }];
         proc.process_events(&press);
         thread::sleep(Duration::from_millis(30));
-        let clicks_after_press = calls.lock().unwrap().len();
+        let clicks_after_press = calls.lock_or_recover().len();
         assert!(clicks_after_press > 0, "Toggle should be ON after press");
 
         // Repeat (value=2) should NOT re-toggle (which would turn it OFF)
@@ -904,7 +905,7 @@ mod tests {
         }];
         proc.process_events(&repeat);
         thread::sleep(Duration::from_millis(30));
-        let clicks_after_repeat = calls.lock().unwrap().len();
+        let clicks_after_repeat = calls.lock_or_recover().len();
         assert!(
             clicks_after_repeat > clicks_after_press,
             "Toggle should still be ON after repeat event, got {} vs {} before repeat",
@@ -958,7 +959,7 @@ mod tests {
             Arc::new(EventBus::new()),
             "test".into(),
         )));
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
         (engine, calls, logger)
     }
 
@@ -1016,7 +1017,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(calls.len(), 1, "Should have forwarded one frame");
         if let BackendCall::ForwardFrame(ref events) = calls[0] {
             assert_eq!(events, &vec![(EV_KEY, BTN_LEFT, 1i32)]);
@@ -1048,7 +1049,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(calls.len(), 1);
         if let BackendCall::ForwardFrame(ref events) = calls[0] {
             assert_eq!(events, &vec![(EV_REL, REL_X, 5i32), (EV_REL, REL_Y, -3i32)]);
@@ -1076,7 +1077,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         // No frame should be forwarded (only event was suppressed)
         assert!(
             calls.is_empty(),
@@ -1114,7 +1115,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert!(
             calls.is_empty(),
             "Both press and release should be suppressed, got {:?}",
@@ -1147,7 +1148,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(
             calls.len(),
             2,
@@ -1212,7 +1213,7 @@ mod tests {
         }]);
 
         // Nothing forwarded yet
-        assert!(fwd_calls.lock().unwrap().is_empty());
+        assert!(fwd_calls.lock_or_recover().is_empty());
 
         // Second poll: rest of frame + SYN_REPORT
         proc.process_events(&[
@@ -1224,7 +1225,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(calls.len(), 1, "Frame should be forwarded after SYN_REPORT");
         if let BackendCall::ForwardFrame(ref events) = calls[0] {
             assert_eq!(
@@ -1264,7 +1265,7 @@ mod tests {
         ]);
 
         // Both should be suppressed
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert!(
             calls.is_empty(),
             "Press and release across polls should both be suppressed, got {:?}",
@@ -1318,7 +1319,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(
             calls.len(),
             1,
@@ -1351,7 +1352,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(
             calls.len(),
             1,
@@ -1401,7 +1402,7 @@ mod tests {
         ]);
 
         // Scroll event was claimed (suppressed) — proves trigger was fired
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert!(
             calls.is_empty(),
             "Matched scroll up should be suppressed, got {:?}",
@@ -1433,7 +1434,7 @@ mod tests {
             Arc::new(EventBus::new()),
             "test".into(),
         )));
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
 
         let binding = scroll_binding_for(crate::config::ScrollDirection::Up, "scroll_click");
         let fwd_backend = MockBackend::new();
@@ -1451,7 +1452,7 @@ mod tests {
         ]);
 
         // Scroll was suppressed
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert!(calls.is_empty(), "Matched scroll should be suppressed");
         // Note: trigger_event was called 3 times internally (once per magnitude unit)
         // We verify this indirectly through suppression — the claim succeeded
@@ -1475,7 +1476,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert!(
             calls.is_empty(),
             "Matched scroll down should be suppressed, got {:?}",
@@ -1507,7 +1508,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         // Both should be suppressed — nothing forwarded
         assert!(
             calls.is_empty(),
@@ -1541,7 +1542,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(calls.len(), 1, "Unmatched scroll should be forwarded");
         if let BackendCall::ForwardFrame(ref events) = calls[0] {
             // Both standard and hi-res should be forwarded
@@ -1592,7 +1593,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(calls.len(), 2, "Both press and release should be forwarded (swallow=false)");
     }
 
@@ -1613,7 +1614,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert!(calls.is_empty(), "swallow=true should suppress both press and release, got {:?}", *calls);
     }
 
@@ -1639,7 +1640,7 @@ mod tests {
             syn_report(),
         ]);
 
-        let calls = fwd_calls.lock().unwrap();
+        let calls = fwd_calls.lock_or_recover();
         assert_eq!(calls.len(), 1, "swallow=false scroll should be forwarded, got {:?}", *calls);
     }
 
@@ -1667,7 +1668,7 @@ mod tests {
             Arc::new(EventBus::new()),
             "test".into(),
         )));
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
 
         // on=Release, swallow=false (validated: swallow+Release forbidden)
         let binding = button_binding(BTN_EXTRA, "BTN_EXTRA", "release_trigger", false, TriggerEdge::Release, false);
@@ -1675,7 +1676,7 @@ mod tests {
 
         // Press: trigger should NOT fire
         proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 }]);
-        assert!(trigger_calls.lock().unwrap().is_empty(), "Trigger should not fire on press with on=release");
+        assert!(trigger_calls.lock_or_recover().is_empty(), "Trigger should not fire on press with on=release");
 
         // Release: trigger SHOULD fire
         proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 }]);
@@ -1707,7 +1708,7 @@ mod tests {
             Arc::new(EventBus::new()),
             "test".into(),
         )));
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
 
         const BTN_SIDE: u16 = 0x113;
 
@@ -1773,7 +1774,7 @@ mod tests {
             Arc::new(EventBus::new()),
             "test".into(),
         )));
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
 
         const BTN_SIDE: u16 = 0x113;
 
@@ -1797,7 +1798,7 @@ mod tests {
         proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_SIDE, value: 1 }]);
         thread::sleep(Duration::from_millis(20));
         assert!(
-            trigger_calls.lock().unwrap().is_empty(),
+            trigger_calls.lock_or_recover().is_empty(),
             "Partial chord press should not fire trigger"
         );
     }

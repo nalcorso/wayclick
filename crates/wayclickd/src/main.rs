@@ -235,8 +235,8 @@ fn main() {
                     if dry_run_override {
                         new_config.options.dry_run = true;
                     }
-                    // Update engine
-                    engine.lock().unwrap().apply_config(new_config.clone());
+                    // Update engine (publishes config_reloaded event after lock is released)
+                    with_engine_events(&engine, |eng| eng.apply_config(new_config.clone()));
                     // Restart evdev monitor with new bindings
                     evdev_monitor.stop();
                     evdev_monitor.configure(new_config.device_bindings);

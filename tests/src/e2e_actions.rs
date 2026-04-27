@@ -9,6 +9,7 @@ mod tests {
     use wayclick_core::config::{
         ActionConfig, CompositeMode, Config, TriggerBinding, TriggerMode,
     };
+    use wayclick_core::engine::with_engine_events;
     use wayclick_core::input_backend::BackendCall;
 
     use crate::helpers::{poll_until, TestDaemon};
@@ -64,7 +65,7 @@ mod tests {
         };
 
         let daemon = TestDaemon::new(config);
-        daemon.engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&daemon.engine, |eng| eng.set_enabled(true));
 
         daemon.ipc("trigger", Some(json!({"id": "ks"})));
 
@@ -95,7 +96,7 @@ mod tests {
 
         let daemon = TestDaemon::new(config);
         let backend_calls = daemon.backend_calls.clone();
-        daemon.engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&daemon.engine, |eng| eng.set_enabled(true));
 
         // Toggle on
         daemon.ipc("trigger", Some(json!({"id": "clicker"})));
@@ -139,7 +140,7 @@ mod tests {
 
         let daemon = TestDaemon::new(config);
         let backend_calls = daemon.backend_calls.clone();
-        daemon.engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&daemon.engine, |eng| eng.set_enabled(true));
 
         // Press
         daemon.ipc("trigger", Some(json!({"id": "holder", "press": true})));
@@ -190,7 +191,7 @@ mod tests {
         };
 
         let daemon = TestDaemon::new(config);
-        daemon.engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&daemon.engine, |eng| eng.set_enabled(true));
 
         daemon.ipc("trigger", Some(json!({"id": "seq"})));
 

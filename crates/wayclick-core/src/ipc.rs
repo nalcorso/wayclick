@@ -756,7 +756,7 @@ mod tests {
             Arc::new(EventBus::new()),
             "test".into(),
         )));
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
 
         let request =
             json!({"jsonrpc": "2.0", "id": 1, "method": "trigger", "params": {"id": "nope"}});
