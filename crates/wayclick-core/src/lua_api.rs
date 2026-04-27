@@ -378,6 +378,66 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
         .set("keystroke", keystroke)
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
 
+    // wayclick.type_text(table) -> action table (sequence of keystrokes)
+    // Types a string character by character using US QWERTY key mappings.
+    // Accepts { text = "...", delay_ms = 30 }. Returns a sequence action
+    // compatible with wayclick.sequence() and all trigger modes that accept
+    // sequences. Only valid in oneshot triggers (inherited from keystroke).
+    let type_text = lua
+        .create_function(|lua, table: LuaTable| {
+            let text: String = table
+                .get::<String>("text")
+                .map_err(|_| LuaError::RuntimeError("type_text requires 'text' field".into()))?;
+            let delay_ms: u32 = table.get("delay_ms").unwrap_or(30);
+
+            let chars: Vec<char> = text.chars().collect();
+            let actions_tbl = lua.create_table()?;
+            let mut idx = 1usize;
+
+            for (ci, &c) in chars.iter().enumerate() {
+                let (key_name, key_code, needs_shift) =
+                    char_to_key_us_qwerty(c).ok_or_else(|| {
+                        LuaError::RuntimeError(format!(
+                            "type_text: character {:?} (U+{:04X}) is not supported on US QWERTY",
+                            c, c as u32
+                        ))
+                    })?;
+
+                let ks = lua.create_table()?;
+                ks.set("_type", "keystroke")?;
+                ks.set("_key_name", key_name)?;
+                ks.set("_key_code", key_code)?;
+                ks.set("_hold_ms", 0u32)?;
+                let names_tbl = lua.create_table()?;
+                let codes_tbl = lua.create_table()?;
+                if needs_shift {
+                    names_tbl.set(1, "KEY_LEFTSHIFT")?;
+                    codes_tbl.set(1, 42u32)?;
+                }
+                ks.set("_modifier_names", names_tbl)?;
+                ks.set("_modifier_codes", codes_tbl)?;
+                actions_tbl.set(idx, ks)?;
+                idx += 1;
+
+                if delay_ms > 0 && ci + 1 < chars.len() {
+                    let dl = lua.create_table()?;
+                    dl.set("_type", "delay")?;
+                    dl.set("_duration_ms", delay_ms)?;
+                    actions_tbl.set(idx, dl)?;
+                    idx += 1;
+                }
+            }
+
+            let action = lua.create_table()?;
+            action.set("_type", "sequence")?;
+            action.set("_actions", actions_tbl)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("type_text", type_text)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
     // wayclick.scroll(table) -> action table
     let scroll = lua
         .create_function(|lua, table: LuaTable| {
@@ -925,6 +985,120 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
 
     Ok(())
+}
+
+/// Map a single character to its US QWERTY keyboard key.
+///
+/// Returns `(key_name, evdev_key_code, needs_shift)` or `None` if the character has no
+/// direct mapping on a US QWERTY layout (e.g., non-ASCII, accented letters, emoji).
+fn char_to_key_us_qwerty(c: char) -> Option<(&'static str, u32, bool)> {
+    match c {
+        // Lowercase letters
+        'a' => Some(("KEY_A", 30, false)),
+        'b' => Some(("KEY_B", 48, false)),
+        'c' => Some(("KEY_C", 46, false)),
+        'd' => Some(("KEY_D", 32, false)),
+        'e' => Some(("KEY_E", 18, false)),
+        'f' => Some(("KEY_F", 33, false)),
+        'g' => Some(("KEY_G", 34, false)),
+        'h' => Some(("KEY_H", 35, false)),
+        'i' => Some(("KEY_I", 23, false)),
+        'j' => Some(("KEY_J", 36, false)),
+        'k' => Some(("KEY_K", 37, false)),
+        'l' => Some(("KEY_L", 38, false)),
+        'm' => Some(("KEY_M", 50, false)),
+        'n' => Some(("KEY_N", 49, false)),
+        'o' => Some(("KEY_O", 24, false)),
+        'p' => Some(("KEY_P", 25, false)),
+        'q' => Some(("KEY_Q", 16, false)),
+        'r' => Some(("KEY_R", 19, false)),
+        's' => Some(("KEY_S", 31, false)),
+        't' => Some(("KEY_T", 20, false)),
+        'u' => Some(("KEY_U", 22, false)),
+        'v' => Some(("KEY_V", 47, false)),
+        'w' => Some(("KEY_W", 17, false)),
+        'x' => Some(("KEY_X", 45, false)),
+        'y' => Some(("KEY_Y", 21, false)),
+        'z' => Some(("KEY_Z", 44, false)),
+        // Uppercase letters (same key code, shift held)
+        'A' => Some(("KEY_A", 30, true)),
+        'B' => Some(("KEY_B", 48, true)),
+        'C' => Some(("KEY_C", 46, true)),
+        'D' => Some(("KEY_D", 32, true)),
+        'E' => Some(("KEY_E", 18, true)),
+        'F' => Some(("KEY_F", 33, true)),
+        'G' => Some(("KEY_G", 34, true)),
+        'H' => Some(("KEY_H", 35, true)),
+        'I' => Some(("KEY_I", 23, true)),
+        'J' => Some(("KEY_J", 36, true)),
+        'K' => Some(("KEY_K", 37, true)),
+        'L' => Some(("KEY_L", 38, true)),
+        'M' => Some(("KEY_M", 50, true)),
+        'N' => Some(("KEY_N", 49, true)),
+        'O' => Some(("KEY_O", 24, true)),
+        'P' => Some(("KEY_P", 25, true)),
+        'Q' => Some(("KEY_Q", 16, true)),
+        'R' => Some(("KEY_R", 19, true)),
+        'S' => Some(("KEY_S", 31, true)),
+        'T' => Some(("KEY_T", 20, true)),
+        'U' => Some(("KEY_U", 22, true)),
+        'V' => Some(("KEY_V", 47, true)),
+        'W' => Some(("KEY_W", 17, true)),
+        'X' => Some(("KEY_X", 45, true)),
+        'Y' => Some(("KEY_Y", 21, true)),
+        'Z' => Some(("KEY_Z", 44, true)),
+        // Digits
+        '0' => Some(("KEY_0", 11, false)),
+        '1' => Some(("KEY_1",  2, false)),
+        '2' => Some(("KEY_2",  3, false)),
+        '3' => Some(("KEY_3",  4, false)),
+        '4' => Some(("KEY_4",  5, false)),
+        '5' => Some(("KEY_5",  6, false)),
+        '6' => Some(("KEY_6",  7, false)),
+        '7' => Some(("KEY_7",  8, false)),
+        '8' => Some(("KEY_8",  9, false)),
+        '9' => Some(("KEY_9", 10, false)),
+        // Shifted digits
+        '!' => Some(("KEY_1",  2, true)),
+        '@' => Some(("KEY_2",  3, true)),
+        '#' => Some(("KEY_3",  4, true)),
+        '$' => Some(("KEY_4",  5, true)),
+        '%' => Some(("KEY_5",  6, true)),
+        '^' => Some(("KEY_6",  7, true)),
+        '&' => Some(("KEY_7",  8, true)),
+        '*' => Some(("KEY_8",  9, true)),
+        '(' => Some(("KEY_9", 10, true)),
+        ')' => Some(("KEY_0", 11, true)),
+        // Punctuation (unshifted)
+        ' '  => Some(("KEY_SPACE",      57, false)),
+        '-'  => Some(("KEY_MINUS",      12, false)),
+        '='  => Some(("KEY_EQUAL",      13, false)),
+        '['  => Some(("KEY_LEFTBRACE",  26, false)),
+        ']'  => Some(("KEY_RIGHTBRACE", 27, false)),
+        '\\' => Some(("KEY_BACKSLASH",  43, false)),
+        ';'  => Some(("KEY_SEMICOLON",  39, false)),
+        '\'' => Some(("KEY_APOSTROPHE", 40, false)),
+        '`'  => Some(("KEY_GRAVE",      41, false)),
+        ','  => Some(("KEY_COMMA",      51, false)),
+        '.'  => Some(("KEY_DOT",        52, false)),
+        '/'  => Some(("KEY_SLASH",      53, false)),
+        // Punctuation (shifted)
+        '_' => Some(("KEY_MINUS",      12, true)),
+        '+' => Some(("KEY_EQUAL",      13, true)),
+        '{' => Some(("KEY_LEFTBRACE",  26, true)),
+        '}' => Some(("KEY_RIGHTBRACE", 27, true)),
+        '|' => Some(("KEY_BACKSLASH",  43, true)),
+        ':' => Some(("KEY_SEMICOLON",  39, true)),
+        '"' => Some(("KEY_APOSTROPHE", 40, true)),
+        '~' => Some(("KEY_GRAVE",      41, true)),
+        '<' => Some(("KEY_COMMA",      51, true)),
+        '>' => Some(("KEY_DOT",        52, true)),
+        '?' => Some(("KEY_SLASH",      53, true)),
+        // Special keys
+        '\n' => Some(("KEY_ENTER", 28, false)),
+        '\t' => Some(("KEY_TAB",   15, false)),
+        _ => None,
+    }
 }
 
 /// Parse a Lua action table (returned by auto_click, key_press, etc.) into an ActionConfig.
@@ -3083,5 +3257,346 @@ mod tests {
         };
         assert_eq!(bb.code_names, vec!["KEY_LEFTCTRL", "BTN_LEFT"]);
         assert_eq!(bb.codes.len(), 2);
+    }
+
+    // ── type_text tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_type_text_basic() {
+        // "hi" → 2 keystroke tables + 1 delay table = 3 actions total
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "t",
+                mode = "oneshot",
+                action = wayclick.type_text({ text = "hi" }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
+            &config.triggers[0].action
+        else {
+            panic!("expected Sequence action");
+        };
+        // 2 chars + 1 delay between them = 3
+        assert_eq!(actions.len(), 3);
+        assert!(matches!(actions[0], ActionConfig::Keystroke { .. }));
+        assert!(matches!(actions[1], ActionConfig::Delay { .. }));
+        assert!(matches!(actions[2], ActionConfig::Keystroke { .. }));
+    }
+
+    #[test]
+    fn test_type_text_key_codes() {
+        // 'h' → KEY_H (code 35), 'i' → KEY_I (code 23)
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "t",
+                mode = "oneshot",
+                action = wayclick.type_text({ text = "hi", delay_ms = 0 }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
+            &config.triggers[0].action
+        else {
+            panic!("expected Sequence action");
+        };
+        // delay_ms = 0 → no delay tables → exactly 2 keystrokes
+        assert_eq!(actions.len(), 2);
+        let ActionConfig::Keystroke {
+            key_name: ref kn0,
+            key_code: kc0,
+            modifier_names: ref mn0,
+            ..
+        } = actions[0]
+        else {
+            panic!("expected Keystroke");
+        };
+        assert_eq!(kn0, "KEY_H");
+        assert_eq!(kc0, 35);
+        assert!(mn0.is_empty(), "lowercase should have no modifiers");
+
+        let ActionConfig::Keystroke {
+            key_name: ref kn1,
+            key_code: kc1,
+            ..
+        } = actions[1]
+        else {
+            panic!("expected Keystroke");
+        };
+        assert_eq!(kn1, "KEY_I");
+        assert_eq!(kc1, 23);
+    }
+
+    #[test]
+    fn test_type_text_uppercase_shift() {
+        // 'H' → KEY_H + KEY_LEFTSHIFT modifier
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "t",
+                mode = "oneshot",
+                action = wayclick.type_text({ text = "H", delay_ms = 0 }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
+            &config.triggers[0].action
+        else {
+            panic!("expected Sequence action");
+        };
+        assert_eq!(actions.len(), 1);
+        let ActionConfig::Keystroke {
+            key_name: ref kn,
+            key_code: kc,
+            modifier_names: ref mn,
+            modifier_codes: ref mc,
+            ..
+        } = actions[0]
+        else {
+            panic!("expected Keystroke");
+        };
+        assert_eq!(kn, "KEY_H");
+        assert_eq!(kc, 35);
+        assert_eq!(mn, &["KEY_LEFTSHIFT"]);
+        assert_eq!(mc, &[42u32]);
+    }
+
+    #[test]
+    fn test_type_text_slash() {
+        // '/' → KEY_SLASH (53), no shift
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "t",
+                mode = "oneshot",
+                action = wayclick.type_text({ text = "/", delay_ms = 0 }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
+            &config.triggers[0].action
+        else {
+            panic!("expected Sequence action");
+        };
+        assert_eq!(actions.len(), 1);
+        let ActionConfig::Keystroke {
+            key_name: ref kn,
+            key_code: kc,
+            modifier_names: ref mn,
+            ..
+        } = actions[0]
+        else {
+            panic!("expected Keystroke");
+        };
+        assert_eq!(kn, "KEY_SLASH");
+        assert_eq!(kc, 53);
+        assert!(mn.is_empty());
+    }
+
+    #[test]
+    fn test_type_text_newline_maps_to_enter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            // Lua \n inside double-quoted string is a literal newline
+            "wayclick.register_trigger({\n\
+             id = \"t\", mode = \"oneshot\",\n\
+             action = wayclick.type_text({ text = \"\\n\", delay_ms = 0 }),\n\
+             })\n",
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
+            &config.triggers[0].action
+        else {
+            panic!("expected Sequence action");
+        };
+        assert_eq!(actions.len(), 1);
+        let ActionConfig::Keystroke {
+            key_name: ref kn,
+            key_code: kc,
+            ..
+        } = actions[0]
+        else {
+            panic!("expected Keystroke");
+        };
+        assert_eq!(kn, "KEY_ENTER");
+        assert_eq!(kc, 28);
+    }
+
+    #[test]
+    fn test_type_text_default_delay() {
+        // 3 chars → 3 keystrokes + 2 delays = 5 actions with default delay_ms
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "t",
+                mode = "oneshot",
+                action = wayclick.type_text({ text = "abc" }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
+            &config.triggers[0].action
+        else {
+            panic!("expected Sequence action");
+        };
+        assert_eq!(actions.len(), 5);
+        // Verify delay is 30ms (the default)
+        let ActionConfig::Delay { duration_ms } = actions[1] else {
+            panic!("expected Delay");
+        };
+        assert_eq!(duration_ms, 30);
+    }
+
+    #[test]
+    fn test_type_text_delay_ms_zero() {
+        // delay_ms = 0 → only keystroke tables, no delay tables
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "t",
+                mode = "oneshot",
+                action = wayclick.type_text({ text = "abc", delay_ms = 0 }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
+            &config.triggers[0].action
+        else {
+            panic!("expected Sequence action");
+        };
+        assert_eq!(actions.len(), 3);
+        assert!(actions.iter().all(|a| matches!(a, ActionConfig::Keystroke { .. })));
+    }
+
+    #[test]
+    fn test_type_text_empty_string() {
+        // Empty text → empty sequence (no error)
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "t",
+                mode = "oneshot",
+                action = wayclick.type_text({ text = "" }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
+            &config.triggers[0].action
+        else {
+            panic!("expected Sequence action");
+        };
+        assert_eq!(actions.len(), 0);
+    }
+
+    #[test]
+    fn test_type_text_unknown_char_errors() {
+        // Emoji is not on US QWERTY → should fail at config load
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "t",
+                mode = "oneshot",
+                action = wayclick.type_text({ text = "hello 🎉" }),
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(
+            result.is_err(),
+            "non-ASCII character should produce a config error"
+        );
+    }
+
+    #[test]
+    fn test_type_text_poe_hideout_macro() {
+        // Full PoE macro: Enter + "/hideout" + Enter via sequence composition
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "hideout",
+                mode = "oneshot",
+                action = wayclick.sequence({
+                    actions = {
+                        wayclick.keystroke({ key = "enter" }),
+                        wayclick.type_text({ text = "/hideout", delay_ms = 0 }),
+                        wayclick.keystroke({ key = "enter" }),
+                    }
+                }),
+            })
+            wayclick.bind_device({
+                name = "keyboard",
+                bindings = {
+                    { code = "KEY_F5", trigger = "hideout" },
+                },
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        assert_eq!(config.triggers[0].id, "hideout");
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, actions: ref outer } =
+            &config.triggers[0].action
+        else {
+            panic!("expected outer Sequence");
+        };
+        // Outer: enter_ks + type_text_seq + enter_ks = 3
+        assert_eq!(outer.len(), 3);
+
+        // Middle element is the type_text expansion: sequence of 8 chars ("/hideout")
+        let ActionConfig::Composite { mode: CompositeMode::Sequence, actions: ref inner } = &outer[1]
+        else {
+            panic!("expected inner Sequence from type_text");
+        };
+        // "/hideout" = 8 chars, delay_ms=0 → exactly 8 keystrokes
+        assert_eq!(inner.len(), 8);
+
+        // First char is '/' → KEY_SLASH
+        let ActionConfig::Keystroke {
+            key_name: ref kn,
+            key_code: kc,
+            ..
+        } = inner[0]
+        else {
+            panic!("expected Keystroke");
+        };
+        assert_eq!(kn, "KEY_SLASH");
+        assert_eq!(kc, 53);
     }
 }

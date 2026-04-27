@@ -150,6 +150,64 @@ wayclick.keystroke({ key = "KEY_LEFTMETA" })
 ```
 ```
 
+### type_text
+
+Types a string character by character using simulated keystrokes. Useful for chat commands,
+macros, and any scenario where you need to type multiple characters in sequence.
+
+> **Keyboard layout:** `type_text` uses a **US QWERTY** mapping. Characters are typed using the
+> physical key positions on a US keyboard. If your system uses a different keyboard layout, the
+> output may differ from the text you specify.
+
+```lua
+wayclick.type_text({
+    text     = "/hideout",  -- required: string to type
+    delay_ms = 30,          -- optional: ms between each keystroke (default: 30)
+})
+```
+
+`type_text` returns a sequence action and can be composed with `wayclick.sequence()`.
+It is **oneshot-only** (same restriction as `keystroke`).
+
+**Supported characters:**
+
+- Printable ASCII: `a`–`z`, `A`–`Z`, `0`–`9`, space, and all standard US QWERTY punctuation
+- `\n` — types Enter (KEY_ENTER)
+- `\t` — types Tab (KEY_TAB)
+- All other characters (accented letters, emoji, etc.) produce a config load error
+
+**Example: Path of Exile hideout macro**
+
+Press F5 to open the chat, type `/hideout`, then send with Enter:
+
+```lua
+wayclick.register_trigger({
+    id = "hideout",
+    mode = "oneshot",
+    action = wayclick.sequence({
+        actions = {
+            wayclick.keystroke({ key = "enter" }),           -- open chat
+            wayclick.type_text({ text = "/hideout" }),       -- type command (30ms between chars)
+            wayclick.keystroke({ key = "enter" }),           -- send command
+        }
+    }),
+})
+
+wayclick.bind_device({
+    name = "keyboard",
+    bindings = {
+        { code = "KEY_F5", trigger = "hideout" },
+    },
+})
+```
+
+To speed up or slow down typing, adjust `delay_ms`:
+
+```lua
+wayclick.type_text({ text = "/hideout", delay_ms = 0 })   -- instant (no delay)
+wayclick.type_text({ text = "/hideout", delay_ms = 100 })  -- slower, 100ms per key
+```
+
 ### scroll
 
 Scrolls in a direction.
