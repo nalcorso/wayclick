@@ -165,8 +165,52 @@ Scroll magnitude is respected — fast scrolling (multiple notches per frame)
 fires the trigger multiple times. Hi-res scroll events are automatically
 suppressed when a standard scroll event matches, preventing double-triggering.
 
+## Chord Bindings
+
+Chords bind a trigger to multiple buttons pressed simultaneously. The buttons
+must be listed in order, separated by `+`. Chord detection requires
+`exclusive = true` so that the individual button events can be suppressed.
+
+```lua
+wayclick.bind_device({
+    name      = "G Pro",
+    exclusive = true,
+    bindings  = {
+        -- Fire only when BOTH side buttons are held simultaneously
+        { code = "BTN_SIDE+BTN_EXTRA", trigger = "combo_action" },
+
+        -- Individual bindings still work — they fire when only one is pressed
+        { code = "BTN_SIDE",  trigger = "side_action" },
+        { code = "BTN_EXTRA", trigger = "extra_action" },
+    },
+})
+```
+
+## Tap vs Long-Press
+
+Use `hold_trigger` and `hold_ms` to bind different triggers to short press
+(tap) and long press on the same button:
+
+```lua
+wayclick.bind_device({
+    name     = "G Pro",
+    bindings = {
+        {
+            code         = "BTN_SIDE",
+            trigger      = "tap_action",   -- fires on quick press-and-release
+            hold_trigger = "hold_action",  -- fires if held longer than hold_ms
+            hold_ms      = 500,            -- 500ms threshold
+        },
+    },
+})
+```
+
+When the button is released before `hold_ms`, `tap_action` fires. When it is
+held for at least `hold_ms`, `hold_action` fires instead.
+
 ## Hotplug
 
-The EvdevMonitor scans for new devices every 2 seconds. When a device matching a
-binding is connected, it is automatically added to monitoring. When a device
-disconnects, its monitoring thread is cleaned up.
+The EvdevMonitor scans for new devices every 2 seconds. When a matched device
+connects, monitoring starts automatically. When it disconnects, the reader
+thread is cleaned up. No config reload is needed.
+

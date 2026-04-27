@@ -63,13 +63,32 @@ cargo test -p wayclick-core --features integration
 4. Add unit tests for config parsing, Lua loading, and engine execution
 5. Add an integration test that fires the trigger via IPC
 
-## Code Style
+## Concurrency Rules
 
-- Follow standard Rust formatting (`cargo fmt`)
-- Use `cargo clippy` to catch common issues
-- Only add comments where the code needs clarification
-- Keep functions focused and small
-- Use `thiserror` for error types
+Wayclick has two distinct mutex policies:
+
+**Engine mutex** — fail-fast. Use `with_engine_events()` (never lock directly
+with `.lock().unwrap()`). This helper collects pending events inside the lock,
+then releases it before publishing to the event bus. This prevents ABBA
+deadlocks and is the only correct way to mutate engine state.
+
+**Peripheral mutexes** (logger, event bus, device tracker, uinput handle) — use
+`lock_or_recover()` from the `MutexExt` trait. These structures can limp on
+after a thread panic; a cascade shutdown would be worse than accepting a
+slightly dirty state.
+
+```rust
+// Correct — releases lock before publishing events
+with_engine_events(&engine, |eng| eng.set_enabled(true));
+
+// Correct — peripheral mutex with recovery
+let entries = self.entries.lock_or_recover();
+
+// Wrong — direct engine lock causes potential deadlock
+engine.lock().unwrap().set_enabled(true); // ← don't do this
+```
+
+
 
 ## Commit Messages
 

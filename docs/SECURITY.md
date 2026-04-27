@@ -126,7 +126,8 @@ Wayclick enforces hard limits to prevent accidental or malicious resource exhaus
 | systemd MemoryMax | 256MB | Prevents unbounded memory consumption |
 | systemd TasksMax | 128 threads | Prevents thread explosion at the OS level |
 | systemd CPUQuota | 50% | Prevents CPU starvation of other applications |
-| Minimum click interval | 1ms (configurable) | Prevents tight CPU loops from auto-click actions |
+| Minimum click interval | 1ms | Prevents tight CPU loops from auto-click actions |
+| Maximum click interval | 3,600,000ms (1 hour) | Prevents accidental infinite-wait configs that hold threads |
 
 **Design decision:** All safety limits are compile-time constants, not user-configurable. They are generous enough for any practical config but prevent catastrophic resource exhaustion.
 

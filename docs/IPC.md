@@ -92,22 +92,127 @@ Clients distinguish notifications from responses by checking `msg.get("id") == n
 
 ## Methods
 
-### Existing methods
+### ping
 
-| Method | Description |
-|--------|-------------|
-| `ping` | Liveness check → `"pong"` |
-| `status` | Returns enabled state, active layer, trigger count, version |
-| `enable` / `disable` / `toggle` | Change enabled state |
-| `set_layer` | Switch active layer |
-| `trigger` | Fire a trigger by ID |
-| `list_triggers` | List all triggers (static + dynamic) |
-| `reload_config` | Reload Lua configuration from disk |
-| `logs` | Tail recent log entries |
-| `list_layers` | List all defined layers |
-| `check_config` | Validate a config file without applying it |
+```json
+→ {"jsonrpc":"2.0","id":1,"method":"ping","params":{}}
+← {"jsonrpc":"2.0","id":1,"result":"pong"}
+```
 
-### subscribe
+### status
+
+Returns daemon state, active layer, trigger count, and version.
+
+```json
+→ {"jsonrpc":"2.0","id":2,"method":"status","params":{}}
+← {"jsonrpc":"2.0","id":2,"result":{
+    "enabled": true,
+    "layer": "base",
+    "trigger_count": 3,
+    "active_trigger_count": 1,
+    "version": "0.1.0"
+  }}
+```
+
+### enable / disable / toggle
+
+```json
+→ {"jsonrpc":"2.0","id":3,"method":"enable","params":{}}
+← {"jsonrpc":"2.0","id":3,"result":{"enabled":true}}
+```
+
+### set_layer
+
+```json
+→ {"jsonrpc":"2.0","id":4,"method":"set_layer","params":{"layer":"combat"}}
+← {"jsonrpc":"2.0","id":4,"result":{"layer":"combat"}}
+```
+
+### list_triggers
+
+Returns all triggers (static + dynamic from all connections).
+
+```json
+→ {"jsonrpc":"2.0","id":5,"method":"list_triggers","params":{}}
+← {"jsonrpc":"2.0","id":5,"result":[
+    {"id":"rapid_fire","name":"Rapid Fire","mode":"toggle","action_type":"auto_click","active":false,"dynamic":false},
+    {"id":"plugin_trigger","name":"Plugin Trigger","mode":"oneshot","action_type":"keystroke","active":false,"dynamic":true}
+  ]}
+```
+
+### list_layers
+
+Returns all layer names defined in the current config.
+
+```json
+→ {"jsonrpc":"2.0","id":6,"method":"list_layers","params":{}}
+← {"jsonrpc":"2.0","id":6,"result":{"layers":["base","combat","menu"],"current":"base"}}
+```
+
+### trigger
+
+Fire a trigger by ID. For toggle triggers, `press: true` activates and
+`press: false` deactivates.
+
+```json
+→ {"jsonrpc":"2.0","id":7,"method":"trigger","params":{"id":"rapid_fire","press":true}}
+← {"jsonrpc":"2.0","id":7,"result":{"triggered":"rapid_fire"}}
+```
+
+### reload_config
+
+Reload the Lua config from disk. All running trigger workers are stopped first.
+The active layer is preserved.
+
+```json
+→ {"jsonrpc":"2.0","id":8,"method":"reload_config","params":{}}
+← {"jsonrpc":"2.0","id":8,"result":{"reloaded":true}}
+```
+
+### check_config
+
+Validate a Lua config file without applying it. Returns the list of validation
+errors, or an empty list if the config is valid.
+
+```json
+→ {"jsonrpc":"2.0","id":9,"method":"check_config","params":{"path":"/home/user/.config/wayclick/new.lua"}}
+← {"jsonrpc":"2.0","id":9,"result":{"valid":true,"errors":[]}}
+```
+
+```json
+← {"jsonrpc":"2.0","id":9,"result":{"valid":false,"errors":["interval_ms 0 is below minimum 1"]}}
+```
+
+> **Note:** `check_config` and `list_layers` are available via IPC but are not
+> yet exposed as `wayclickctl` subcommands. Use IPC directly, or request them
+> from a script.
+
+### logs
+
+Tail recent log entries from the ring buffer.
+
+```json
+→ {"jsonrpc":"2.0","id":10,"method":"logs","params":{"tail":20}}
+← {"jsonrpc":"2.0","id":10,"result":[
+    {"level":"info","message":"trigger rapid_fire activated","timestamp_ms":1745760000000},
+    {"level":"info","message":"trigger rapid_fire deactivated","timestamp_ms":1745760005000}
+  ]}
+```
+
+---
+
+## Error codes
+
+| Code | Meaning |
+|---|---|
+| `-32600` | Invalid JSON-RPC request (malformed frame, missing fields) |
+| `-32601` | Method not found |
+| `-32602` | Invalid parameters (validation error, duplicate trigger ID, unknown trigger ID) |
+| `-32000` | Internal engine error (unexpected failure) |
+
+---
+
+
 
 Start receiving push events on this connection.  Omit `events` (or pass `null`) to
 receive all event types.
@@ -179,7 +284,7 @@ Sequence action example (hideout macro):
 **Errors:**
 
 ```json
-← {"jsonrpc":"2.0","id":4,"error":{"code":-32000,"message":"Trigger ID 'rapid_fire' already exists"}}
+← {"jsonrpc":"2.0","id":4,"error":{"code":-32602,"message":"Trigger ID 'rapid_fire' already exists"}}
 ← {"jsonrpc":"2.0","id":5,"error":{"code":-32602,"message":"Validation error: interval_ms 0 is below minimum 1"}}
 ```
 

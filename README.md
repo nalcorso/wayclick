@@ -3,172 +3,204 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust: 1.85+](https://img.shields.io/badge/rust-1.85%2B-orange.svg)](https://www.rust-lang.org/)
 
-**Programmable mouse automation daemon for Linux.** Read physical button presses
-via evdev, execute configurable actions through uinput — works with any Linux
-desktop environment (Wayland, X11, or headless), fully scriptable with Lua.
+**Kernel-level input automation for Linux.**
 
-> **AI Disclosure** — This project was developed with the assistance of AI coding
-> agents (Claude Opus 4.6 via GitHub Copilot) running locally. Because the agents
-> run locally through the developer's GitHub Copilot session, all commits are
-> attributed to the maintainer's GitHub account rather than a separate AI user.
-> All AI-generated code was reviewed, tested, and approved by the maintainer. The
-> architecture, design decisions, and final implementation remain the
+Wayclick reads physical button presses directly from the kernel's input layer
+(evdev) and fires configurable actions through a virtual device (uinput). It
+doesn't care which display server you're running — Wayland, X11, or none at
+all. Write your config in Lua. Run it as a systemd service. Automate everything.
+
+> **AI Disclosure** — Developed with AI coding agents (Claude via GitHub
+> Copilot). All code was reviewed, tested, and approved by the maintainer.
+> Architecture, design decisions, and final implementation remain the
 > responsibility of the human author.
 
 ---
 
-## Features
+## What wayclick does
 
-- **Lua-scriptable** — Neovim-style `init.lua` configuration with composable
-  actions, helper functions, and module support
-- **Display server agnostic** — operates at the kernel input layer (evdev/uinput),
-  works with Wayland, X11, or any Linux environment
-- **Per-device targeting** — bind actions to specific mice by name, VID:PID, or
-  physical port — survives USB reconnects via hotplug monitoring
-- **Composable actions** — auto-click, key sequences, mouse movement, scroll,
-  delays, drag, media keys — combine them with `sequence` and `parallel`
-- **Trigger modes** — Toggle (on/off), Hold (active while pressed), OneShot
-  (fire once)
-- **Layers** — switch between binding sets at runtime (e.g. "base" vs "combat")
-- **Button chording** — bind actions to multi-button combos like `BTN_SIDE+BTN_EXTRA`
-- **Scroll remapping** — remap mouse wheel up/down to clicks or any action
-  (popular for ARPGs) with magnitude-aware multi-fire
-- **Hot-reload** — edit your config and send `SIGHUP` or `wayclickctl reload` —
-  no restart needed
-- **TUI dashboard** — real-time view of triggers, devices, and logs
-- **IPC control** — JSON-RPC over Unix socket; control the daemon from scripts,
-  keybindings, or the CLI
-- **Waybar integration** — status module with layer display, active trigger
-  indicators, and themed CSS presets
+- **Scroll-to-click** — remap the scroll wheel to mouse clicks (the classic
+  ARPG technique: scroll to rapid-fire left-click without wearing out the button)
+- **Auto-click** — toggle rapid clicking on/off with a side button, with
+  configurable interval, jitter, and hold duration
+- **Macros** — type text, fire keystroke sequences, chain any combination of
+  actions with delays in between
+- **Layer switching** — maintain separate binding sets and switch between them
+  at runtime (base layer, combat layer, menu layer)
+- **Button chording** — bind actions to multi-button combos
+- **IPC control** — connect via Unix socket from scripts, game plugins, or any
+  external tool to register triggers dynamically and subscribe to events
 
-## Components
+## How it works
 
-| Binary | Purpose |
-|---|---|
-| `wayclickd` | Daemon — reads devices, executes triggers, serves IPC |
-| `wayclickctl` | CLI — control the daemon (status, toggle, trigger, reload, layer) |
-| `wayclick-tui` | TUI — real-time dashboard with trigger state and logs |
-| `wayclick-evdev-dump` | Diagnostic — list devices, monitor events, identify buttons |
-| `wayclick-input-viz` | Visual testing — GPU-accelerated input visualizer with particle effects |
+```
+  Physical device            Lua config
+        │                        │
+        ▼                        ▼
+   EvdevSource ──────┐     load_config()
+        │            │          │
+        ▼            │          ▼
+   EvdevMonitor ─────┼───→  Engine ──→ InputBackend
+        │            │       │  ▲          │
+        │            │       │  │          ├─ UinputBackend ──→ /dev/uinput
+        │            │       │  │          └─ LoggingBackend (dry-run)
+        │            │       │  │
+        ▼            │       ▼  │
+  [button event] ────┘    IpcServer ◄──► wayclickctl / wayclick-tui
+                               │
+                           Unix socket
+```
 
-## Quick Start
+---
+
+## Quick start
+
+→ **New user?** See [docs/QUICKSTART.md](docs/QUICKSTART.md) for worked examples
+of the three most common setups.
+
+The short version:
 
 ```sh
-# Build
+# 1. Build
 cargo build --workspace --release
 
-# Set up permissions (creates groups + udev rules)
+# 2. Set up permissions (groups + udev rules — requires log out/in after)
 ./scripts/install.sh
 
-# Log out and back in for group changes to take effect, then:
+# 3. Copy the example config
+mkdir -p ~/.config/wayclick
+cp config/init.lua ~/.config/wayclick/init.lua
+
+# 4. Start the daemon
 wayclickd --enable
 ```
 
-The daemon loads `~/.config/wayclick/init.lua` on startup. If the file doesn't
-exist, copy the example:
-
-```sh
-mkdir -p ~/.config/wayclick
-cp config/init.lua ~/.config/wayclick/init.lua
-```
+---
 
 ## Configuration
 
-Wayclick is configured with Lua. Here's a minimal auto-clicker on mouse button 5:
+Wayclick is configured entirely in Lua. The config file is
+`~/.config/wayclick/init.lua`.
+
+Here's a complete scroll-to-click setup — the most popular use case:
 
 ```lua
-wayclick.set_options({ dry_run = false })
-
+-- Remap scroll wheel to left-click (requires exclusive device access)
 wayclick.register_trigger({
-  id = "auto_clicker",
-  name = "Auto Clicker",
-  mode = "toggle",
-  cooldown_ms = 300,
-  action = wayclick.auto_click({
-    button = "left",
-    interval_ms = 10,
-    jitter_ms = 2,
-    hold_ms = 2,
-  }),
+  id    = "left_click",
+  mode  = "oneshot",
+  action = wayclick.click({ button = "left" }),
 })
 
 wayclick.bind_device({
-  vid = 0x046d, pid = 0xc08b,   -- Logitech G Pro
-  bindings = {
-    { code = "BTN_EXTRA", trigger = "auto_clicker" },
+  name      = "G Pro",       -- substring match on device name
+  exclusive = true,          -- EVIOCGRAB: suppress original scroll events
+  bindings  = {
+    { scroll = "up",   trigger = "left_click" },
+    { scroll = "down", trigger = "left_click" },
   },
 })
 ```
 
-### Available Actions
+See [examples/scroll_remap.lua](examples/scroll_remap.lua) for the full
+annotated version.
 
-| Action | Description |
-|---|---|
-| `auto_click` | Repeated mouse clicks with configurable interval, jitter, and hold |
-| `key_sequence` | Press/release keyboard keys (including media keys) |
-| `scroll` | Scroll wheel automation (vertical or horizontal) |
-| `mouse_move` | Relative mouse movement with speed control |
-| `mouse_move_abs` | Absolute cursor positioning |
-| `click_at` | Move to position and click |
-| `drag` | Click-drag from one position to another |
-| `delay` | Pause for a duration (for sequences) |
-| `set_layer` | Switch the active binding layer |
-| `media_key` | Press a media key (volume, play/pause, etc.) |
-| `sequence` | Run actions one after another |
-| `parallel` | Run actions simultaneously |
+### Available actions
 
-### Trigger Modes
+| Action | Mode constraint | Description |
+|---|---|---|
+| `auto_click` | toggle / hold / oneshot | Repeated mouse clicks with configurable interval and jitter |
+| `click` | oneshot | Single mouse click |
+| `key_press` | toggle / hold / oneshot | Repeated keyboard key presses |
+| `keystroke` | **oneshot only** | Single key chord (key + optional modifiers) |
+| `type_text` | **oneshot only** | Type a string character by character |
+| `scroll` | toggle / hold / oneshot | Scroll wheel output |
+| `mouse_move` | toggle / hold / oneshot | Relative cursor movement |
+| `mouse_move_abs` | **oneshot only** | Absolute cursor positioning |
+| `click_at` | **oneshot only** | Move to absolute position and click |
+| `drag` | **oneshot only** | Click-drag between two positions |
+| `set_layer` | **oneshot only** | Switch active binding layer |
+| `media_key` | oneshot | Press a media key (volume, play/pause, etc.) |
+| `delay` | — | Pause for a fixed duration (use inside `sequence`) |
+| `sequence` | any | Run actions one after another |
+| `parallel` | toggle / hold | Run actions simultaneously |
+
+See [docs/CONFIG_SCHEMA.md](docs/CONFIG_SCHEMA.md) for the full API reference
+with all parameters, defaults, and examples.
+
+### Trigger modes
 
 | Mode | Behaviour |
 |---|---|
-| `toggle` | First press starts, second press stops |
-| `hold` | Active while button is held, stops on release |
+| `toggle` | First press starts the action, second press stops it |
+| `hold` | Active while the button is held; stops on release |
 | `oneshot` | Fires once per press |
 
-### Device Identification
-
-Use the built-in diagnostic tool to find your device:
+### Device identification
 
 ```sh
-# List all input devices
-wayclick-evdev-dump list
-
-# Press a button to identify it
-wayclick-evdev-dump identify
+wayclick-evdev-dump list      # List all accessible input devices
+wayclick-evdev-dump identify  # Press a button — prints the device and code
 ```
 
 See [docs/DEVICE_MATCHING.md](docs/DEVICE_MATCHING.md) for matching by name,
-VID:PID, or physical path.
+VID:PID, physical path, and binding chords or tap-vs-hold patterns.
 
-## CLI Reference
+---
 
-```sh
-wayclickctl status              # Show daemon state and active triggers
-wayclickctl toggle              # Toggle enabled/disabled
-wayclickctl enable              # Enable the daemon
-wayclickctl disable             # Disable the daemon
-wayclickctl trigger <id>        # Fire a trigger by ID
-wayclickctl list                # List all configured triggers
-wayclickctl reload              # Reload configuration
-wayclickctl layer get           # Show current layer
-wayclickctl layer set <name>    # Switch to a named layer
-wayclickctl logs                # Tail recent log entries
-wayclickctl waybar              # Output Waybar-compatible JSON
-wayclickctl waybar --continuous # Continuous mode for Waybar exec
+## CLI reference
+
+```
+wayclickctl <command> [options]
 ```
 
-## Waybar Integration
+| Command | Description |
+|---|---|
+| `status` | Show daemon state, active layer, trigger count |
+| `ping` | Check if the daemon is running |
+| `toggle` | Toggle automation on/off |
+| `enable` | Enable automation |
+| `disable` | Disable automation |
+| `trigger <id>` | Fire a trigger by ID |
+| `list` | List all configured triggers with their current state |
+| `reload` | Reload configuration from disk |
+| `logs [--tail N]` | Show recent log entries (default: 50) |
+| `layer get` | Show the current active layer |
+| `layer set <name>` | Switch to a named layer |
+| `waybar [--continuous] [--interval N] [--format minimal\|normal\|verbose]` | Output Waybar-compatible JSON |
+
+Global flags: `--socket <path>`, `--json`, `--timeout <ms>`
+
+---
+
+## IPC and programmatic control
+
+Wayclick exposes a Unix socket with a JSON-RPC 2.0 protocol. Any language that
+can open a socket can control it. Connect from game plugins, scripts, or other
+daemons to register dynamic triggers, subscribe to events, or query status.
+
+```sh
+# Quick test — is the daemon alive?
+echo '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' | \
+  nc -U "$XDG_RUNTIME_DIR/wayclick.sock" | head -c 1000
+```
+
+See [docs/IPC.md](docs/IPC.md) for the full protocol reference, all methods,
+event types, Python/bash examples, and the dynamic trigger lifecycle.
+
+---
+
+## Waybar integration
 
 A status module for [Waybar](https://github.com/Alexays/Waybar) is included
-in [`extras/waybar/`](extras/waybar/). It displays the daemon state, current
-layer, and active triggers with themed CSS.
+in [`extras/waybar/`](extras/waybar/).
 
 ```jsonc
 // ~/.config/waybar/config.jsonc
 "custom/wayclick": {
-    "exec": "wayclickctl waybar",
+    "exec": "wayclickctl waybar --continuous --interval 2",
+    "exec-on-event": false,
     "return-type": "json",
-    "interval": 2,
     "on-click": "wayclickctl toggle",
     "format": "{}",
     "tooltip": true
@@ -176,13 +208,15 @@ layer, and active triggers with themed CSS.
 ```
 
 Three display formats are available: `minimal` (icon only), `normal`
-(icon + layer), and `verbose` (icon + layer + active count). Four CSS themes
-are included (Default, Catppuccin, Pill, Gaming). See the
-[module README](extras/waybar/README.md) for full setup instructions.
+(icon + layer name), and `verbose` (icon + layer + active trigger count).
+Four CSS themes are included: Default, Catppuccin, Pill, and Gaming.
+See the [module README](extras/waybar/README.md) for full setup instructions.
+
+---
 
 ## Installation
 
-### From Source
+### From source
 
 ```sh
 git clone https://github.com/nalcorso/wayclick.git
@@ -196,7 +230,14 @@ cargo install --path crates/wayclick-evdev-dump
 ### Permissions
 
 Wayclick needs read access to `/dev/input/event*` and write access to
-`/dev/uinput`. The install script handles this, or do it manually:
+`/dev/uinput`. The install script handles this:
+
+```sh
+./scripts/install.sh
+# Then log out and back in
+```
+
+Or manually:
 
 ```sh
 sudo groupadd -f wayclick
@@ -207,24 +248,51 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 See [docs/PERMISSIONS.md](docs/PERMISSIONS.md) for details.
 
-### systemd
+### systemd user service
 
 ```sh
 cp systemd/wayclickd.service ~/.config/systemd/user/
 systemctl --user enable --now wayclickd
 ```
 
-### Hyprland Integration
-
-Bind `wayclickctl` commands to Hyprland keys for quick toggle/reload:
+### Hyprland
 
 ```conf
-bind = SUPER, F9, exec, wayclickctl toggle
+bind = SUPER, F9,  exec, wayclickctl toggle
 bind = SUPER, F12, exec, wayclickctl reload
 exec-once = wayclickd --enable
 ```
 
-See [docs/HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) for more examples.
+See [docs/HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) for more examples
+including submaps and per-trigger bindings.
+
+---
+
+## Components
+
+| Binary | Purpose |
+|---|---|
+| `wayclickd` | Daemon — reads devices, executes triggers, serves IPC |
+| `wayclickctl` | CLI — control the running daemon |
+| `wayclick-tui` | TUI — real-time dashboard with trigger state and logs |
+| `wayclick-evdev-dump` | Diagnostic — list devices, monitor events, identify buttons |
+| `wayclick-input-viz` | Visual testing — GPU-accelerated input visualizer |
+
+---
+
+## Security
+
+- **No network access** — local-only Unix socket IPC with `0600` permissions
+- **Sandboxed Lua** — `os.execute`, `io.popen`, `load`, `debug`, `require` for
+  native modules all removed; `io.open` restricted to config directory, read-only
+- **Least privilege** — runs as your user; needs only `wayclick` + `input` groups
+- **Fuzz-tested** — config loading, IPC framing, and device matching are all
+  fuzz targets
+
+See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model and Lua
+sandbox details.
+
+---
 
 ## Development
 
@@ -232,16 +300,16 @@ See [docs/HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) for more examples.
 
 - Rust 1.85+ (via [rustup](https://rustup.rs))
 - Linux with kernel support for uinput and evdev
-- `gcc` or `clang` (for vendored Lua build)
+- `gcc` or `clang` (for the vendored Lua build)
 
-### With mise
+### With mise (recommended)
 
 ```sh
-mise run build      # Build all crates
-mise run test       # Run all tests
-mise run check      # fmt + clippy + test + deny (full pre-commit check)
-mise run bench      # Run Criterion benchmarks
-mise run fuzz       # Run fuzz tests (requires nightly)
+mise run build    # Build all crates
+mise run test     # Run all tests
+mise run check    # fmt + clippy + test + deny (full pre-commit suite)
+mise run bench    # Run Criterion benchmarks
+mise run fuzz     # Run fuzz tests (requires nightly)
 ```
 
 ### Without mise
@@ -255,96 +323,40 @@ cargo fmt --all -- --check
 
 See [docs/BUILDING.md](docs/BUILDING.md) for cross-compilation and fuzz testing.
 
-### Benchmarks
-
-Criterion.rs micro-benchmarks cover the three critical paths:
-
-| Group | What it measures |
-|-------|-----------------|
-| `action_execution` | Click dispatch, action sequences, parallel execution, toggle lifecycle |
-| `config_loading` | Lua config parsing at various complexity levels (1–100 triggers, nesting depth) |
-| `ipc_framing` | JSON-RPC frame encode/decode, Unix socket roundtrip |
-
-```sh
-# Quick smoke test (~1 min)
-mise run bench-quick
-
-# Full benchmark suite with saved report
-./scripts/bench-report.sh    # → bench-results/<timestamp>-<commit>.json
-```
-
-Reports include git commit, system info (CPU model, governor, memory), and per-benchmark confidence intervals.
-
-## Architecture
-
-```
-  Physical Device           Lua Config
-       │                        │
-       ▼                        ▼
-  EvdevSource ──────┐    load_config()
-       │            │         │
-       ▼            │         ▼
-  EvdevMonitor ─────┼──→  Engine ──→ InputBackend
-       │            │      │  ▲         │
-       │            │      │  │         ├─ UinputBackend ──→ /dev/uinput
-       │            │      │  │         └─ LoggingBackend (dry-run)
-       │            │      │  │
-       ▼            │      ▼  │
-  [button event] ───┘   IpcServer ◄──► wayclickctl / wayclick-tui
-                           │
-                        Unix Socket
-```
-
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full module breakdown
-and threading model.
-
-## Examples
-
-The [`examples/`](examples/) directory contains ready-to-use Lua configs:
-
-- **[morse_clicker.lua](examples/morse_clicker.lua)** — clicks mouse morse code
-  for any word using a full A–Z + 0–9 dictionary. Demo spells "banana" for the
-  Revolution Idle achievement.
-
-Copy an example to `~/.config/wayclick/init.lua` to try it out.
-
-## Security
-
-- **No network access** — local-only, Unix socket IPC with `0600` permissions
-- **Sandboxed Lua** — `os.execute`, `io.popen`, `load`, `debug` all removed;
-  `io.open` restricted to read-only
-- **Least privilege** — runs as your user, needs only `wayclick` + `input` groups
-- **Fuzz-tested** — config loading, IPC framing, and device matching are all
-  fuzz targets
-- **Supply chain** — `cargo deny` runs as part of `mise run check`
-
-See [docs/SECURITY.md](docs/SECURITY.md) for the full threat model.
+---
 
 ## Documentation
 
 | Document | Description |
 |---|---|
-| [CONFIG_SCHEMA.md](docs/CONFIG_SCHEMA.md) | Complete Lua API and configuration reference |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crate layout, data flow, threading model |
-| [DEVICE_MATCHING.md](docs/DEVICE_MATCHING.md) | How to identify and bind physical devices |
-| [PERMISSIONS.md](docs/PERMISSIONS.md) | Group setup, udev rules, systemd service |
-| [SECURITY.md](docs/SECURITY.md) | Threat model, Lua sandbox, IPC security |
-| [BUILDING.md](docs/BUILDING.md) | Build from source, testing, fuzz testing |
-| [CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development workflow, adding actions, code style |
-| [HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) | Hyprland keybinding examples |
-| [extras/waybar/](extras/waybar/) | Waybar status module with themes |
-| [examples/](examples/) | Example Lua configurations |
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | Worked examples for the three most common setups |
+| [docs/CONFIG_SCHEMA.md](docs/CONFIG_SCHEMA.md) | Complete Lua API reference |
+| [docs/IPC.md](docs/IPC.md) | IPC protocol reference with Python/bash examples |
+| [docs/DEVICE_MATCHING.md](docs/DEVICE_MATCHING.md) | How to identify and bind physical devices |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | Planned features, known limitations, API stability |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Crate layout, data flow, threading model |
+| [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | Group setup, udev rules, systemd service |
+| [docs/SECURITY.md](docs/SECURITY.md) | Threat model, Lua sandbox, IPC security |
+| [docs/BUILDING.md](docs/BUILDING.md) | Build from source, testing, fuzz targets |
+| [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development workflow, adding action types |
+| [docs/HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) | Hyprland keybinding examples |
+| [extras/waybar/](extras/waybar/) | Waybar status module with CSS themes |
+| [examples/](examples/) | Ready-to-use Lua config examples |
+
+---
 
 ## Contributing
 
-See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). In short:
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
 
 ```sh
 git clone https://github.com/nalcorso/wayclick.git
 cd wayclick && ./scripts/dev.sh
 # Make changes, then:
-cargo test --workspace && cargo clippy --workspace -- -D warnings
+mise run check   # or: cargo test --workspace && cargo clippy --workspace -- -D warnings
 ```
+
+---
 
 ## License
 

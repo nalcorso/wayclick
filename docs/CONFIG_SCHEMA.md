@@ -1,19 +1,60 @@
-# Config Schema Reference
+# Lua API Reference
 
-Wayclick is configured with Lua scripts. The entry point is `init.lua`.
+Wayclick is configured with Lua scripts. The entry point is `~/.config/wayclick/init.lua`.
+
+The `wayclick` table is provided by the daemon — you don't `require` it. Your
+script calls functions on it to register triggers, bind devices, and set options.
+Everything is evaluated once at startup (or on hot-reload). There is no persistent
+Lua runtime after config load.
+
+---
 
 ## Global Options
 
 ```lua
 wayclick.set_options({
-    dry_run = false,           -- Log actions instead of emitting real input events
-    socket_path = nil,         -- Override IPC socket path (default: XDG_RUNTIME_DIR/wayclick.sock)
-    log_capacity = 512,        -- Maximum number of log entries in the ring buffer
-    min_interval_ms = 1,       -- Minimum allowed click interval in ms (prevents tight CPU loops)
+    dry_run        = false,  -- Log actions instead of emitting real input events
+    socket_path    = nil,    -- Override IPC socket path (default: $XDG_RUNTIME_DIR/wayclick.sock)
+    log_capacity   = 512,    -- Ring buffer size for log entries (default: 512)
+    min_interval_ms = 1,     -- Minimum click/key interval in ms (default: 1; must be ≥ 1)
 })
 ```
 
+**Interval limits:** The minimum action interval is `min_interval_ms` (configurable,
+default 1ms). The maximum is a compile-time constant of **3,600,000ms (1 hour)**.
+Values outside this range are rejected at config load time.
+
 ## Triggers
+
+Triggers are the core unit of wayclick. Each trigger has an ID, a mode, and an
+action. Triggers are activated by device bindings or fired programmatically via
+IPC.
+
+```lua
+wayclick.register_trigger({
+    id          = "my_trigger",    -- required: unique string identifier
+    name        = "My Trigger",    -- optional: human-readable name (defaults to id)
+    description = "",              -- optional: description for display in TUI/IPC
+    mode        = "oneshot",       -- required: "toggle" | "hold" | "oneshot"
+    action      = ...,             -- required: action function result
+    cooldown_ms = 0,               -- optional: minimum ms between activations (default: 0)
+    duration_ms = nil,             -- optional: auto-stop toggle/hold after N ms (default: unlimited)
+})
+```
+
+### Trigger modes
+
+| Mode | Behaviour |
+|---|---|
+| `toggle` | First activation starts the action loop; second activation stops it |
+| `hold` | Action runs while the trigger is held; stops when released |
+| `oneshot` | Runs the action once per activation |
+
+**Oneshot-only constraint:** The actions `keystroke`, `type_text`, `click_at`,
+`drag`, `mouse_move_abs`, and `set_layer` can only be used with `mode = "oneshot"`.
+Using them with `toggle` or `hold` is a config error.
+
+---
 
 ### auto_click
 
@@ -147,7 +188,6 @@ wayclick.keystroke({ key = "F4", modifiers = {"alt"} })
 
 -- Super key alone
 wayclick.keystroke({ key = "KEY_LEFTMETA" })
-```
 ```
 
 ### type_text
@@ -435,16 +475,24 @@ The default layer is `"base"`. Layer state persists across config reloads.
 
 ## Per-App Profiles
 
-Automatically switch layers based on the active window (Hyprland only):
+> **⚠️ Not yet implemented.** The `wayclick.set_profile()` function parses and
+> stores profile rules without error, but the engine does not act on them at
+> runtime. Automatic layer switching based on window focus is planned — see
+> [ROADMAP.md](ROADMAP.md).
+
+The API is defined for forward compatibility:
 
 ```lua
 wayclick.set_profile({
-    name = "gaming",
-    match_app = "steam_app_.*",    -- Regex on window app_id/class
-    -- match_title = "Minecraft",  -- Regex on window title
-    layer = "combat",              -- Auto-switch to this layer
+    name       = "gaming",
+    match_app  = "steam_app_.*",    -- regex on window app_id/class
+    -- match_title = "Minecraft",   -- regex on window title
+    layer      = "combat",          -- intended: auto-switch to this layer
 })
 ```
+
+In the meantime, use `wayclickctl layer set <name>` from a window-focus hook
+(e.g., a Hyprland `windowfocused` event handler) to achieve the same effect.
 
 ## Lua Modules
 
@@ -500,30 +548,33 @@ Key names follow the Linux `KEY_*` constants:
 
 See the full list with `wayclick-evdev-dump monitor`.
 
-## CLI (wayclickctl)
+## CLI reference (wayclickctl)
 
-| Command                    | Description                        |
-|----------------------------|------------------------------------|
-| `wayclickctl status`       | Show daemon status                 |
-| `wayclickctl toggle`       | Toggle automation on/off           |
-| `wayclickctl enable`       | Enable automation                  |
-| `wayclickctl disable`      | Disable automation                 |
-| `wayclickctl trigger <id>` | Fire a trigger                     |
-| `wayclickctl list`         | List all triggers                  |
-| `wayclickctl reload`       | Reload configuration               |
-| `wayclickctl logs`         | Show recent log entries            |
-| `wayclickctl layer get`    | Show current active layer          |
-| `wayclickctl layer set <name>` | Switch to a different layer    |
-| `wayclickctl ping`         | Check if daemon is running         |
-| `wayclickctl waybar`       | Output Waybar-compatible JSON      |
+See the README for the full table. Key commands:
 
-## SIGHUP Reload
+| Command | Description |
+|---|---|
+| `wayclickctl status` | Show daemon state, active layer, trigger count |
+| `wayclickctl ping` | Check if the daemon is running |
+| `wayclickctl toggle` | Toggle automation on/off |
+| `wayclickctl enable` / `disable` | Enable or disable automation |
+| `wayclickctl trigger <id>` | Fire a trigger by ID |
+| `wayclickctl list` | List all triggers with current state |
+| `wayclickctl reload` | Reload configuration from disk |
+| `wayclickctl logs [--tail N]` | Show recent log entries |
+| `wayclickctl layer get` | Show current active layer |
+| `wayclickctl layer set <name>` | Switch to a named layer |
+| `wayclickctl waybar [--continuous]` | Output Waybar-compatible JSON |
 
-The daemon reloads its configuration on `SIGHUP`:
+## Config hot-reload
 
-```bash
-systemctl --user reload wayclickd    # via systemd
-kill -HUP $(pidof wayclickd)         # direct signal
+The daemon reloads its configuration on `SIGHUP` or via the CLI:
+
+```sh
+wayclickctl reload                  # via CLI
+systemctl --user reload wayclickd   # via systemd
+kill -HUP $(pidof wayclickd)        # direct signal
 ```
 
-This reloads the Lua config and restarts the evdev monitor with new bindings.
+Hot-reload restarts the evdev monitor with the new bindings. Running triggers
+are stopped before reload. The active layer is preserved.
