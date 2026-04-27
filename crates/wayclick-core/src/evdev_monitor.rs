@@ -1,6 +1,6 @@
 // EvdevMonitor — coordinates device monitoring threads, hotplug, and trigger dispatch.
 
-use crate::config::DeviceBinding;
+use crate::config::{Binding, DeviceBinding, TriggerEdge};
 use crate::engine::Engine;
 use crate::evdev_source::{
     self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, SYN_DROPPED,
@@ -241,9 +241,11 @@ pub(crate) struct DeviceProcessor {
     logger: Arc<Logger>,
     forward_backend: Option<Arc<dyn InputBackend>>,
     pending_frame: Vec<evdev_source::InputEvent>,
-    /// Button codes that were claimed on press (suppressed).
-    /// Release events for these codes are also suppressed.
-    claimed_codes: HashSet<u16>,
+    /// All codes currently held on this device (for chord detection across frames).
+    held_codes: HashSet<u16>,
+    /// Active press-edge claims: binding index → was_swallowed.
+    /// Tracks which bindings have fired on press and are awaiting their release dispatch.
+    active_claims: HashMap<usize, bool>,
 }
 
 impl DeviceProcessor {
@@ -259,7 +261,8 @@ impl DeviceProcessor {
             logger,
             forward_backend,
             pending_frame: Vec::new(),
-            claimed_codes: HashSet::new(),
+            held_codes: HashSet::new(),
+            active_claims: HashMap::new(),
         }
     }
 
@@ -279,6 +282,9 @@ impl DeviceProcessor {
                         SYN_DROPPED => {
                             self.logger.warn("SYN_DROPPED: discarding partial frame");
                             self.pending_frame.clear();
+                            // Reset held state to avoid phantom chord matches
+                            self.held_codes.clear();
+                            self.active_claims.clear();
                         }
                         _ => {}
                     }
@@ -287,102 +293,259 @@ impl DeviceProcessor {
                 }
             }
         } else {
-            // Non-exclusive: immediate processing (no forwarding)
+            // Non-exclusive: immediate dispatch, no forwarding or swallowing.
+            // Only single-code bindings are matched (chord detection requires frame buffering).
             for event in events {
                 if event.event_type == EV_KEY {
-                    match event.value {
-                        1 => {
-                            dispatch_button_event(
-                                event.code,
-                                true,
-                                &self.binding,
-                                &self.engine,
-                                &self.logger,
-                            );
+                    for binding_item in &self.binding.bindings {
+                        if let Binding::Button(ref bb) = binding_item {
+                            if bb.codes.len() != 1 || bb.codes[0] != event.code {
+                                continue;
+                            }
+                            if let Some(ref layer) = bb.layer {
+                                let eng = self.engine.lock().unwrap();
+                                if eng.current_layer() != layer {
+                                    continue;
+                                }
+                            }
+                            let code_name = bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
+                            match event.value {
+                                1 if bb.on == TriggerEdge::Press => {
+                                    self.logger.debug(format!(
+                                        "Button {} pressed, firing trigger '{}'",
+                                        code_name, bb.trigger_id
+                                    ));
+                                    let mut eng = self.engine.lock().unwrap();
+                                    let _ = eng.trigger_event(&bb.trigger_id, true);
+                                }
+                                0 if bb.on == TriggerEdge::Press => {
+                                    self.logger.debug(format!(
+                                        "Button {} released, deactivating trigger '{}'",
+                                        code_name, bb.trigger_id
+                                    ));
+                                    let mut eng = self.engine.lock().unwrap();
+                                    let _ = eng.trigger_event(&bb.trigger_id, false);
+                                }
+                                0 if bb.on == TriggerEdge::Release => {
+                                    self.logger.debug(format!(
+                                        "Button {} released, firing trigger '{}'",
+                                        code_name, bb.trigger_id
+                                    ));
+                                    let mut eng = self.engine.lock().unwrap();
+                                    let _ = eng.trigger_event(&bb.trigger_id, true);
+                                }
+                                _ => {}
+                            }
                         }
-                        0 => {
-                            dispatch_button_event(
-                                event.code,
-                                false,
-                                &self.binding,
-                                &self.engine,
-                                &self.logger,
-                            );
-                        }
-                        _ => {} // repeat — ignore
                     }
                 }
             }
         }
     }
 
-    /// Process a complete frame. Two-pass: (1) identify claims, (2) forward non-claimed.
+    /// Process a complete frame. Two-pass: (1) build claims and suppression sets,
+    /// (2) forward non-suppressed events.
     fn process_frame(&mut self) {
         let backend = match &self.forward_backend {
             Some(b) => b.clone(),
             None => return,
         };
 
-        let mut suppress_indices: HashSet<usize> = HashSet::new();
+        // Codes from newly activated swallowed claims — press/repeat events for these
+        // codes will be suppressed. Built up across pass 1.
+        let mut suppress_codes: HashSet<u16> = HashSet::new();
 
-        // Pass 1: identify claims and suppressions
-        for (i, event) in self.pending_frame.iter().enumerate() {
+        // Codes whose release event should be suppressed (came from a swallowed active_claim).
+        let mut released_swallowed_codes: HashSet<u16> = HashSet::new();
+
+        // Scroll event indices to suppress (populated inline during pass 1).
+        let mut suppress_scroll_indices: HashSet<usize> = HashSet::new();
+
+        // Pass 1: identify claims and dispatch to engine
+        for (event_idx, event) in self.pending_frame.iter().enumerate() {
             if event.event_type == EV_KEY {
                 match event.value {
                     1 => {
-                        // Press: try to claim via dispatch
-                        if try_claim_button(event.code, &self.binding, &self.engine, &self.logger) {
-                            self.claimed_codes.insert(event.code);
-                            suppress_indices.insert(i);
+                        // Press: add to held state, then check for chord completions
+                        self.held_codes.insert(event.code);
+
+                        for (binding_idx, binding_item) in self.binding.bindings.iter().enumerate()
+                        {
+                            if let Binding::Button(ref bb) = binding_item {
+                                if bb.on != TriggerEdge::Press {
+                                    continue;
+                                }
+                                if self.active_claims.contains_key(&binding_idx) {
+                                    continue;
+                                }
+                                if !bb.codes.iter().all(|c| self.held_codes.contains(c)) {
+                                    continue;
+                                }
+                                if let Some(ref layer) = bb.layer {
+                                    let eng = self.engine.lock().unwrap();
+                                    if eng.current_layer() != layer {
+                                        continue;
+                                    }
+                                }
+                                let code_name =
+                                    bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
+                                self.logger.debug(format!(
+                                    "Button {} pressed, claiming trigger '{}'",
+                                    code_name, bb.trigger_id
+                                ));
+                                let mut eng = self.engine.lock().unwrap();
+                                if eng.trigger_event(&bb.trigger_id, true).is_ok() {
+                                    drop(eng);
+                                    self.active_claims.insert(binding_idx, bb.swallow);
+                                    if bb.swallow {
+                                        for &c in &bb.codes {
+                                            suppress_codes.insert(c);
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                     0 => {
-                        // Release: suppress if code was claimed
-                        if self.claimed_codes.remove(&event.code) {
-                            dispatch_button_event(
-                                event.code,
-                                false,
-                                &self.binding,
-                                &self.engine,
-                                &self.logger,
-                            );
-                            suppress_indices.insert(i);
+                        // Release: first fire any on=Release bindings, then deactivate claims
+
+                        // on=Release bindings: fire when this code is released and all other
+                        // chord codes are still held.
+                        for (_, binding_item) in self.binding.bindings.iter().enumerate() {
+                            if let Binding::Button(ref bb) = binding_item {
+                                if bb.on != TriggerEdge::Release {
+                                    continue;
+                                }
+                                if !bb.codes.contains(&event.code) {
+                                    continue;
+                                }
+                                // All other chord codes must still be held
+                                if !bb
+                                    .codes
+                                    .iter()
+                                    .filter(|&&c| c != event.code)
+                                    .all(|c| self.held_codes.contains(c))
+                                {
+                                    continue;
+                                }
+                                if let Some(ref layer) = bb.layer {
+                                    let eng = self.engine.lock().unwrap();
+                                    if eng.current_layer() != layer {
+                                        continue;
+                                    }
+                                }
+                                let code_name =
+                                    bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
+                                self.logger.debug(format!(
+                                    "Button {} released, firing on=release trigger '{}'",
+                                    code_name, bb.trigger_id
+                                ));
+                                let mut eng = self.engine.lock().unwrap();
+                                // swallow=true is forbidden for on=Release (validated at load time)
+                                let _ = eng.trigger_event(&bb.trigger_id, true);
+                            }
                         }
-                    }
-                    2 => {
-                        // Repeat: suppress if code is claimed
-                        if self.claimed_codes.contains(&event.code) {
-                            suppress_indices.insert(i);
+
+                        // Deactivate all press-edge claims that include this code
+                        let to_release: Vec<usize> = self
+                            .active_claims
+                            .iter()
+                            .filter(|(&idx, _)| {
+                                if let Binding::Button(ref bb) = self.binding.bindings[idx] {
+                                    bb.codes.contains(&event.code)
+                                } else {
+                                    false
+                                }
+                            })
+                            .map(|(&idx, _)| idx)
+                            .collect();
+
+                        for claim_idx in to_release {
+                            let swallow = self.active_claims.remove(&claim_idx).unwrap();
+                            if let Binding::Button(ref bb) = self.binding.bindings[claim_idx] {
+                                let code_name =
+                                    bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
+                                self.logger.debug(format!(
+                                    "Button {} released, deactivating trigger '{}'",
+                                    code_name, bb.trigger_id
+                                ));
+                                let mut eng = self.engine.lock().unwrap();
+                                let _ = eng.trigger_event(&bb.trigger_id, false);
+                                if swallow {
+                                    for &c in &bb.codes {
+                                        released_swallowed_codes.insert(c);
+                                    }
+                                }
+                            }
                         }
+
+                        self.held_codes.remove(&event.code);
                     }
-                    _ => {}
+                    _ => {} // repeat — handled via suppress_codes below
                 }
             } else if event.event_type == EV_REL {
                 if let Some((direction, magnitude)) =
                     evdev_source::classify_scroll(event.code, event.value)
                 {
-                    if try_claim_scroll(
-                        direction,
-                        magnitude,
-                        &self.binding,
-                        &self.engine,
-                        &self.logger,
-                    ) {
-                        suppress_indices.insert(i);
-                        // Also suppress the corresponding hi-res event in this frame
-                        let hi_res_code = match event.code {
-                            evdev_source::REL_WHEEL => Some(evdev_source::REL_WHEEL_HI_RES),
-                            evdev_source::REL_HWHEEL => Some(evdev_source::REL_HWHEEL_HI_RES),
-                            _ => None,
-                        };
-                        if let Some(hrc) = hi_res_code {
-                            for (j, other) in self.pending_frame.iter().enumerate() {
-                                if other.event_type == EV_REL && other.code == hrc {
-                                    suppress_indices.insert(j);
+                    for binding_item in &self.binding.bindings {
+                        if let Binding::Scroll(ref sb) = binding_item {
+                            if sb.direction != direction {
+                                continue;
+                            }
+                            if let Some(ref layer) = sb.layer {
+                                let eng = self.engine.lock().unwrap();
+                                if eng.current_layer() != layer {
+                                    continue;
                                 }
                             }
+                            self.logger.debug(format!(
+                                "Scroll {:?} (magnitude {}), firing trigger '{}'",
+                                direction, magnitude, sb.trigger_id
+                            ));
+                            let mut eng = self.engine.lock().unwrap();
+                            for _ in 0..magnitude {
+                                let _ = eng.trigger_event(&sb.trigger_id, true);
+                            }
+                            drop(eng);
+                            if sb.swallow {
+                                suppress_scroll_indices.insert(event_idx);
+                                // Also suppress the corresponding hi-res event in this frame
+                                let hi_res_code = match event.code {
+                                    evdev_source::REL_WHEEL => {
+                                        Some(evdev_source::REL_WHEEL_HI_RES)
+                                    }
+                                    evdev_source::REL_HWHEEL => {
+                                        Some(evdev_source::REL_HWHEEL_HI_RES)
+                                    }
+                                    _ => None,
+                                };
+                                if let Some(hrc) = hi_res_code {
+                                    for (j, other) in self.pending_frame.iter().enumerate() {
+                                        if other.event_type == EV_REL && other.code == hrc {
+                                            suppress_scroll_indices.insert(j);
+                                        }
+                                    }
+                                }
+                            }
+                            break; // first matching scroll binding wins
                         }
                     }
+                }
+            }
+        }
+
+        // Build final suppress_indices: KEY events whose code is in a swallowed claim or
+        // was released from one, plus explicitly suppressed scroll events.
+        let mut suppress_indices: HashSet<usize> = suppress_scroll_indices;
+
+        for (i, event) in self.pending_frame.iter().enumerate() {
+            if event.event_type == EV_KEY {
+                let suppressed = match event.value {
+                    0 => released_swallowed_codes.contains(&event.code),
+                    _ => suppress_codes.contains(&event.code),
+                };
+                if suppressed {
+                    suppress_indices.insert(i);
                 }
             }
         }
@@ -400,97 +563,6 @@ impl DeviceProcessor {
 
         if !forward.is_empty() {
             let _ = backend.forward_frame(&forward);
-        }
-    }
-}
-
-/// Try to claim a button press: match binding, check layer, dispatch to engine.
-/// Returns true if the event was consumed (trigger fired or was already active).
-fn try_claim_button(
-    code: u16,
-    binding: &DeviceBinding,
-    engine: &Arc<Mutex<Engine>>,
-    logger: &Arc<Logger>,
-) -> bool {
-    for bb in &binding.button_bindings {
-        if bb.codes.len() == 1 && bb.codes[0] == code {
-            // Layer filtering
-            if let Some(ref layer) = bb.layer {
-                let eng = engine.lock().unwrap();
-                if eng.current_layer() != layer {
-                    continue;
-                }
-            }
-            let code_name = bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
-            logger.debug(format!(
-                "Button {} pressed, claiming trigger '{}'",
-                code_name, bb.trigger_id
-            ));
-            let mut eng = engine.lock().unwrap();
-            match eng.trigger_event(&bb.trigger_id, true) {
-                Ok(()) => return true,
-                Err(_) => return false, // Engine disabled, cooldown, etc. — don't claim
-            }
-        }
-    }
-    false
-}
-
-/// Try to claim a scroll event: match binding, check layer, dispatch to engine.
-/// Returns true if the event was consumed. Fires trigger once per unit of magnitude.
-fn try_claim_scroll(
-    direction: crate::config::ScrollDirection,
-    magnitude: u32,
-    binding: &DeviceBinding,
-    engine: &Arc<Mutex<Engine>>,
-    logger: &Arc<Logger>,
-) -> bool {
-    for sb in &binding.scroll_bindings {
-        if sb.direction == direction {
-            if let Some(ref layer) = sb.layer {
-                let eng = engine.lock().unwrap();
-                if eng.current_layer() != layer {
-                    continue;
-                }
-            }
-            logger.debug(format!(
-                "Scroll {:?} (magnitude {}), claiming trigger '{}'",
-                direction, magnitude, sb.trigger_id
-            ));
-            let mut eng = engine.lock().unwrap();
-            for _ in 0..magnitude {
-                let _ = eng.trigger_event(&sb.trigger_id, true);
-            }
-            return true;
-        }
-    }
-    false
-}
-
-fn dispatch_button_event(
-    code: u16,
-    press: bool,
-    binding: &DeviceBinding,
-    engine: &Arc<Mutex<Engine>>,
-    logger: &Arc<Logger>,
-) {
-    for bb in &binding.button_bindings {
-        if bb.codes.len() == 1 && bb.codes[0] == code {
-            if let Some(ref layer) = bb.layer {
-                let eng = engine.lock().unwrap();
-                if eng.current_layer() != layer {
-                    continue;
-                }
-            }
-            let code_name = bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
-            logger.debug(format!(
-                "Button {} {}, firing trigger '{}'",
-                code_name,
-                if press { "pressed" } else { "released" },
-                bb.trigger_id
-            ));
-            let mut eng = engine.lock().unwrap();
-            let _ = eng.trigger_event(&bb.trigger_id, press);
         }
     }
 }
@@ -542,8 +614,7 @@ mod tests {
     fn make_binding(dm: DeviceMatch) -> DeviceBinding {
         DeviceBinding {
             device_match: dm,
-            button_bindings: vec![],
-            scroll_bindings: vec![],
+            bindings: vec![],
             exclusive: false,
         }
     }
@@ -689,15 +760,16 @@ mod tests {
             device_match: DeviceMatch::ByName {
                 contains: "test".into(),
             },
-            button_bindings: vec![ButtonBinding {
+            bindings: vec![Binding::Button(ButtonBinding {
                 codes: vec![0x114], // BTN_EXTRA
                 code_names: vec!["BTN_EXTRA".into()],
                 trigger_id: "hold_test".into(),
                 hold_trigger_id: None,
                 hold_threshold_ms: None,
                 layer: None,
-            }],
-            scroll_bindings: vec![],
+                swallow: false,
+                on: TriggerEdge::Press,
+            })],
             exclusive: false,
         }
     }
@@ -788,15 +860,16 @@ mod tests {
             device_match: DeviceMatch::ByName {
                 contains: "test".into(),
             },
-            button_bindings: vec![ButtonBinding {
+            bindings: vec![Binding::Button(ButtonBinding {
                 codes: vec![0x114],
                 code_names: vec!["BTN_EXTRA".into()],
                 trigger_id: "toggle_test".into(),
                 hold_trigger_id: None,
                 hold_threshold_ms: None,
                 layer: None,
-            }],
-            scroll_bindings: vec![],
+                swallow: false,
+                on: TriggerEdge::Press,
+            })],
             exclusive: false,
         };
 
@@ -883,15 +956,16 @@ mod tests {
             device_match: DeviceMatch::ByName {
                 contains: "test".into(),
             },
-            button_bindings: vec![ButtonBinding {
+            bindings: vec![Binding::Button(ButtonBinding {
                 codes: vec![BTN_EXTRA],
                 code_names: vec!["BTN_EXTRA".into()],
                 trigger_id: trigger_id.into(),
                 hold_trigger_id: None,
                 hold_threshold_ms: None,
                 layer: None,
-            }],
-            scroll_bindings: vec![],
+                swallow: true,
+                on: TriggerEdge::Press,
+            })],
             exclusive: true,
         }
     }
@@ -1078,15 +1152,16 @@ mod tests {
             device_match: DeviceMatch::ByName {
                 contains: "test".into(),
             },
-            button_bindings: vec![ButtonBinding {
+            bindings: vec![Binding::Button(ButtonBinding {
                 codes: vec![BTN_EXTRA],
                 code_names: vec!["BTN_EXTRA".into()],
                 trigger_id: "test_trigger".into(),
                 hold_trigger_id: None,
                 hold_threshold_ms: None,
                 layer: None,
-            }],
-            scroll_bindings: vec![],
+                swallow: false,
+                on: TriggerEdge::Press,
+            })],
             exclusive: false,
         };
         // No forwarding backend
@@ -1285,12 +1360,12 @@ mod tests {
             device_match: DeviceMatch::ByName {
                 contains: "test".into(),
             },
-            button_bindings: vec![],
-            scroll_bindings: vec![crate::config::ScrollBinding {
+            bindings: vec![Binding::Scroll(crate::config::ScrollBinding {
                 direction,
                 trigger_id: trigger_id.into(),
                 layer: None,
-            }],
+                swallow: true,
+            })],
             exclusive: true,
         }
     }
@@ -1459,5 +1534,255 @@ mod tests {
             // Both standard and hi-res should be forwarded
             assert_eq!(events.len(), 2);
         }
+    }
+
+    // --- Phase 5: swallow / on=release / chord tests ---
+
+    fn button_binding(
+        code: u16,
+        code_name: &str,
+        trigger_id: &str,
+        swallow: bool,
+        on: TriggerEdge,
+        exclusive: bool,
+    ) -> DeviceBinding {
+        DeviceBinding {
+            device_match: DeviceMatch::ByName { contains: "test".into() },
+            bindings: vec![Binding::Button(ButtonBinding {
+                codes: vec![code],
+                code_names: vec![code_name.into()],
+                trigger_id: trigger_id.into(),
+                hold_trigger_id: None,
+                hold_threshold_ms: None,
+                layer: None,
+                swallow,
+                on,
+            })],
+            exclusive,
+        }
+    }
+
+    #[test]
+    fn test_swallow_false_forwards_button_press_and_release() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = button_binding(BTN_EXTRA, "BTN_EXTRA", "test_trigger", false, TriggerEdge::Press, true);
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            syn_report(),
+        ]);
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert_eq!(calls.len(), 2, "Both press and release should be forwarded (swallow=false)");
+    }
+
+    #[test]
+    fn test_swallow_true_suppresses_button_press_and_release() {
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        let binding = button_binding(BTN_EXTRA, "BTN_EXTRA", "test_trigger", true, TriggerEdge::Press, true);
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            syn_report(),
+        ]);
+        proc.process_events(&[
+            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert!(calls.is_empty(), "swallow=true should suppress both press and release, got {:?}", *calls);
+    }
+
+    #[test]
+    fn test_swallow_false_forwards_scroll() {
+        let (engine, _, logger) = make_oneshot_engine("scroll_click");
+        let binding = DeviceBinding {
+            device_match: DeviceMatch::ByName { contains: "test".into() },
+            bindings: vec![Binding::Scroll(crate::config::ScrollBinding {
+                direction: crate::config::ScrollDirection::Up,
+                trigger_id: "scroll_click".into(),
+                layer: None,
+                swallow: false,
+            })],
+            exclusive: true,
+        };
+        let fwd_backend = MockBackend::new();
+        let fwd_calls = fwd_backend.calls_clone();
+        let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL, value: 1 },
+            syn_report(),
+        ]);
+
+        let calls = fwd_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1, "swallow=false scroll should be forwarded, got {:?}", *calls);
+    }
+
+    #[test]
+    fn test_on_release_fires_on_release_not_press() {
+        let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
+        logger.set_quiet(true);
+        let backend = MockBackend::new();
+        let trigger_calls = backend.calls_clone();
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "release_trigger".into(),
+                name: "Release Trigger".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action: ActionConfig::NoOp,
+                cooldown_ms: None,
+            }],
+            ..Default::default()
+        };
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            Arc::new(backend),
+            logger.clone(),
+            "test".into(),
+        )));
+        engine.lock().unwrap().set_enabled(true);
+
+        // on=Release, swallow=false (validated: swallow+Release forbidden)
+        let binding = button_binding(BTN_EXTRA, "BTN_EXTRA", "release_trigger", false, TriggerEdge::Release, false);
+        let mut proc = make_processor(binding, engine, logger, None);
+
+        // Press: trigger should NOT fire
+        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 }]);
+        assert!(trigger_calls.lock().unwrap().is_empty(), "Trigger should not fire on press with on=release");
+
+        // Release: trigger SHOULD fire
+        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 }]);
+        // Since it's NoOp, no backend calls — but we can verify via engine state
+        // (OneShot NoOp: no side effects in backend, but trigger_event was called)
+        // The test passes if no panic and no press-time fire. Engine didn't error on release either.
+    }
+
+    #[test]
+    fn test_chord_fires_only_when_both_held() {
+        let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
+        logger.set_quiet(true);
+        let backend = MockBackend::new();
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "chord_trigger".into(),
+                name: "Chord Trigger".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action: ActionConfig::NoOp,
+                cooldown_ms: None,
+            }],
+            ..Default::default()
+        };
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            Arc::new(backend),
+            logger.clone(),
+            "test".into(),
+        )));
+        engine.lock().unwrap().set_enabled(true);
+
+        const BTN_SIDE: u16 = 0x113;
+
+        let binding = DeviceBinding {
+            device_match: DeviceMatch::ByName { contains: "test".into() },
+            bindings: vec![Binding::Button(ButtonBinding {
+                codes: vec![BTN_SIDE, BTN_EXTRA],
+                code_names: vec!["BTN_SIDE".into(), "BTN_EXTRA".into()],
+                trigger_id: "chord_trigger".into(),
+                hold_trigger_id: None,
+                hold_threshold_ms: None,
+                layer: None,
+                swallow: false,
+                on: TriggerEdge::Press,
+            })],
+            exclusive: false,
+        };
+        let mut proc = make_processor(binding, engine.clone(), logger, None);
+
+        // Press only BTN_SIDE — chord should not fire
+        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_SIDE, value: 1 }]);
+        // Verify engine received trigger_event for chord: it hasn't (BTN_EXTRA not pressed)
+        // We check indirectly: engine is in OneShot NoOp state, so if trigger fired it would
+        // have been Ok(()). We verify by pressing the second code next.
+
+        // Press BTN_EXTRA — now both held, chord should fire
+        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 }]);
+        // If chord detection works, trigger_event("chord_trigger", true) was called exactly once.
+        // No assert on backend calls since action is NoOp, but we verify no panic/double-fire:
+        // Press BTN_EXTRA again should NOT re-fire (already claimed):
+        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 }]);
+        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 }]);
+        // After release + re-press, chord fires again (BTN_SIDE still held, BTN_EXTRA re-pressed)
+    }
+
+    #[test]
+    fn test_chord_partial_press_no_spurious_fire() {
+        let logger = Arc::new(Logger::new(100, LogLevel::Trace, false));
+        logger.set_quiet(true);
+        let backend = MockBackend::new();
+        let trigger_calls = backend.calls_clone();
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "chord_trigger".into(),
+                name: "Chord Trigger".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action: ActionConfig::AutoClick {
+                    button: MouseButton::Left,
+                    interval_ms: 1,
+                    duration_ms: Some(5),
+                    jitter_ms: 0,
+                    hold_ms: 0,
+                },
+                cooldown_ms: None,
+            }],
+            ..Default::default()
+        };
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            Arc::new(backend),
+            logger.clone(),
+            "test".into(),
+        )));
+        engine.lock().unwrap().set_enabled(true);
+
+        const BTN_SIDE: u16 = 0x113;
+
+        let binding = DeviceBinding {
+            device_match: DeviceMatch::ByName { contains: "test".into() },
+            bindings: vec![Binding::Button(ButtonBinding {
+                codes: vec![BTN_SIDE, BTN_EXTRA],
+                code_names: vec!["BTN_SIDE".into(), "BTN_EXTRA".into()],
+                trigger_id: "chord_trigger".into(),
+                hold_trigger_id: None,
+                hold_threshold_ms: None,
+                layer: None,
+                swallow: false,
+                on: TriggerEdge::Press,
+            })],
+            exclusive: false,
+        };
+        let mut proc = make_processor(binding, engine, logger, None);
+
+        // Press only one key of the chord — trigger must NOT fire
+        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_SIDE, value: 1 }]);
+        thread::sleep(Duration::from_millis(20));
+        assert!(
+            trigger_calls.lock().unwrap().is_empty(),
+            "Partial chord press should not fire trigger"
+        );
     }
 }

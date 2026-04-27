@@ -763,8 +763,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 .get::<LuaTable>("bindings")
                 .map_err(|_| LuaError::RuntimeError("bind_device requires 'bindings' field".into()))?;
 
-            let mut button_bindings = Vec::new();
-            let mut scroll_bindings = Vec::new();
+            let mut bindings: Vec<Binding> = Vec::new();
             for pair in bindings_table.sequence_values::<LuaTable>() {
                 let binding = pair?;
 
@@ -772,17 +771,24 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 if let Ok(scroll_dir_str) = binding.get::<String>("scroll") {
                     let trigger_id: String = binding.get("trigger")?;
                     let layer: Option<String> = binding.get("layer").ok();
+                    let swallow: bool = binding.get("swallow").unwrap_or(false);
                     let direction = ScrollDirection::from_str_name(&scroll_dir_str).map_err(|e| {
                         LuaError::RuntimeError(format!(
                             "Invalid scroll direction '{}': {}",
                             scroll_dir_str, e
                         ))
                     })?;
-                    scroll_bindings.push(ScrollBinding {
+                    if swallow && !exclusive {
+                        return Err(LuaError::RuntimeError(
+                            "bind_device: swallow=true requires exclusive=true".into(),
+                        ));
+                    }
+                    bindings.push(Binding::Scroll(ScrollBinding {
                         direction,
                         trigger_id,
                         layer,
-                    });
+                        swallow,
+                    }));
                     continue;
                 }
 
@@ -791,6 +797,11 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 let hold_trigger_id: Option<String> = binding.get("hold_trigger").ok();
                 let hold_threshold_ms: Option<u32> = binding.get("hold_ms").ok();
                 let layer: Option<String> = binding.get("layer").ok();
+                let swallow: bool = binding.get("swallow").unwrap_or(false);
+                let on_str: String = binding.get("on").unwrap_or_else(|_| "press".into());
+                let on = TriggerEdge::from_str(&on_str).map_err(|e| {
+                    LuaError::RuntimeError(format!("Invalid 'on' value '{}': {}", on_str, e))
+                })?;
 
                 // Parse code string — supports chords like "BTN_SIDE+BTN_EXTRA"
                 let code_names: Vec<String> = code_str
@@ -819,18 +830,39 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                     ));
                 }
 
-                button_bindings.push(ButtonBinding {
+                if swallow && !exclusive {
+                    return Err(LuaError::RuntimeError(
+                        "bind_device: swallow=true requires exclusive=true".into(),
+                    ));
+                }
+
+                if on == TriggerEdge::Release && swallow {
+                    return Err(LuaError::RuntimeError(
+                        "bind_device: swallow=true is incompatible with on=\"release\" (press already forwarded)".into(),
+                    ));
+                }
+
+                if on == TriggerEdge::Release && hold_trigger_id.is_some() {
+                    return Err(LuaError::RuntimeError(
+                        "bind_device: on=\"release\" is incompatible with hold_trigger".into(),
+                    ));
+                }
+
+                bindings.push(Binding::Button(ButtonBinding {
                     codes,
                     code_names,
                     trigger_id,
                     hold_trigger_id,
                     hold_threshold_ms,
                     layer,
-                });
+                    swallow,
+                    on,
+                }));
             }
 
             // Validate: scroll bindings require exclusive mode
-            if !scroll_bindings.is_empty() && !exclusive {
+            let has_scroll = bindings.iter().any(|b| matches!(b, Binding::Scroll(_)));
+            if has_scroll && !exclusive {
                 return Err(LuaError::RuntimeError(
                     "bind_device: scroll bindings require exclusive=true".into(),
                 ));
@@ -839,8 +871,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             let mut builder = lua.app_data_mut::<ConfigBuilder>().unwrap();
             builder.device_bindings.push(DeviceBinding {
                 device_match,
-                button_bindings,
-                scroll_bindings,
+                bindings,
                 exclusive,
             });
 
@@ -869,15 +900,16 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             ));
             builder.device_bindings.push(DeviceBinding {
                 device_match: DeviceMatch::ByPath { path: device },
-                button_bindings: vec![ButtonBinding {
+                bindings: vec![Binding::Button(ButtonBinding {
                     codes: vec![code],
                     code_names: vec![code_str],
                     trigger_id,
                     hold_trigger_id: None,
                     hold_threshold_ms: None,
                     layer: None,
-                }],
-                scroll_bindings: vec![],
+                    swallow: false,
+                    on: TriggerEdge::Press,
+                })],
                 exclusive: false,
             });
 
@@ -2121,7 +2153,9 @@ mod tests {
         "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let binding = &config.device_bindings[0].button_bindings[0];
+        let Binding::Button(ref binding) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Button binding");
+        };
         assert_eq!(binding.codes, vec![59]); // KEY_F1 = 59
         assert_eq!(binding.code_names, vec!["KEY_F1"]);
     }
@@ -2146,7 +2180,9 @@ mod tests {
         "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let binding = &config.device_bindings[0].button_bindings[0];
+        let Binding::Button(ref binding) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Button binding");
+        };
         assert_eq!(binding.codes, vec![0x113, 0x114]);
         assert_eq!(binding.code_names, vec!["BTN_SIDE", "BTN_EXTRA"]);
     }
@@ -2175,7 +2211,9 @@ mod tests {
         "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let binding = &config.device_bindings[0].button_bindings[0];
+        let Binding::Button(ref binding) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Button binding");
+        };
         assert_eq!(binding.hold_trigger_id, Some("hold_action".to_string()));
         assert_eq!(binding.hold_threshold_ms, Some(500));
     }
@@ -2200,7 +2238,9 @@ mod tests {
         "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let binding = &config.device_bindings[0].button_bindings[0];
+        let Binding::Button(ref binding) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Button binding");
+        };
         assert_eq!(binding.layer, Some("combat".to_string()));
     }
 
@@ -2506,10 +2546,8 @@ mod tests {
         assert!(result.is_ok(), "Failed: {:?}", result.err());
         let config = result.unwrap();
         assert_eq!(config.device_bindings.len(), 1);
-        assert_eq!(config.device_bindings[0].scroll_bindings.len(), 1);
-        assert_eq!(
-            config.device_bindings[0].scroll_bindings[0].direction,
-            ScrollDirection::Up
+        assert!(
+            matches!(config.device_bindings[0].bindings[0], Binding::Scroll(ref sb) if sb.direction == ScrollDirection::Up)
         );
     }
 
@@ -2542,8 +2580,18 @@ mod tests {
         let result = load_config(&path, &test_logger());
         assert!(result.is_ok(), "Failed: {:?}", result.err());
         let config = result.unwrap();
-        assert_eq!(config.device_bindings[0].scroll_bindings.len(), 2);
-        assert_eq!(config.device_bindings[0].button_bindings.len(), 1);
+        let scroll_count = config.device_bindings[0]
+            .bindings
+            .iter()
+            .filter(|b| matches!(b, Binding::Scroll(_)))
+            .count();
+        let button_count = config.device_bindings[0]
+            .bindings
+            .iter()
+            .filter(|b| matches!(b, Binding::Button(_)))
+            .count();
+        assert_eq!(scroll_count, 2);
+        assert_eq!(button_count, 1);
     }
 
     #[test]
@@ -2865,5 +2913,175 @@ mod tests {
             "Error should mention keystroke or oneshot: {}",
             err
         );
+    }
+
+    // --- swallow / on / chord lua_api tests ---
+
+    #[test]
+    fn test_bind_device_swallow_defaults_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({ id = "t", action = wayclick.noop() })
+            wayclick.bind_device({
+                name = "mouse",
+                bindings = { { code = "BTN_EXTRA", trigger = "t" } },
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let Binding::Button(ref bb) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Button binding");
+        };
+        assert!(!bb.swallow, "swallow should default to false");
+        assert_eq!(bb.on, TriggerEdge::Press, "on should default to Press");
+    }
+
+    #[test]
+    fn test_bind_device_swallow_true_button() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({ id = "t", action = wayclick.noop() })
+            wayclick.bind_device({
+                name = "mouse",
+                exclusive = true,
+                bindings = { { code = "BTN_EXTRA", trigger = "t", swallow = true } },
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let Binding::Button(ref bb) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Button binding");
+        };
+        assert!(bb.swallow, "swallow should be true");
+    }
+
+    #[test]
+    fn test_bind_device_swallow_true_scroll() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({ id = "t", action = wayclick.noop() })
+            wayclick.bind_device({
+                name = "mouse",
+                exclusive = true,
+                bindings = { { scroll = "up", trigger = "t", swallow = true } },
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let Binding::Scroll(ref sb) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Scroll binding");
+        };
+        assert!(sb.swallow, "scroll swallow should be true");
+    }
+
+    #[test]
+    fn test_bind_device_on_release_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({ id = "t", action = wayclick.noop() })
+            wayclick.bind_device({
+                name = "mouse",
+                bindings = { { code = "BTN_EXTRA", trigger = "t", on = "release" } },
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let Binding::Button(ref bb) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Button binding");
+        };
+        assert_eq!(bb.on, TriggerEdge::Release);
+    }
+
+    #[test]
+    fn test_bind_device_swallow_requires_exclusive() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({ id = "t", action = wayclick.noop() })
+            wayclick.bind_device({
+                name = "mouse",
+                exclusive = false,
+                bindings = { { code = "BTN_EXTRA", trigger = "t", swallow = true } },
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err(), "swallow=true without exclusive=true should error");
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("exclusive"), "Error should mention exclusive: {}", err);
+    }
+
+    #[test]
+    fn test_bind_device_on_release_swallow_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({ id = "t", action = wayclick.noop() })
+            wayclick.bind_device({
+                name = "mouse",
+                exclusive = true,
+                bindings = { { code = "BTN_EXTRA", trigger = "t", on = "release", swallow = true } },
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err(), "on=release + swallow=true should error");
+    }
+
+    #[test]
+    fn test_bind_device_on_release_with_hold_trigger_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({ id = "t", action = wayclick.noop() })
+            wayclick.register_trigger({ id = "h", action = wayclick.noop() })
+            wayclick.bind_device({
+                name = "mouse",
+                bindings = { { code = "BTN_EXTRA", trigger = "t", on = "release", hold_trigger = "h", hold_ms = 500 } },
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err(), "on=release + hold_trigger should error");
+    }
+
+    #[test]
+    fn test_bind_device_key_mouse_chord() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({ id = "t", action = wayclick.noop() })
+            wayclick.bind_device({
+                name = "macro pad",
+                bindings = { { code = "KEY_LEFTCTRL+BTN_LEFT", trigger = "t" } },
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        let Binding::Button(ref bb) = config.device_bindings[0].bindings[0] else {
+            panic!("Expected Button binding");
+        };
+        assert_eq!(bb.code_names, vec!["KEY_LEFTCTRL", "BTN_LEFT"]);
+        assert_eq!(bb.codes.len(), 2);
     }
 }

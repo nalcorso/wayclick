@@ -61,6 +61,30 @@ impl TriggerMode {
     }
 }
 
+/// Controls whether a button/key binding fires its trigger on press or release.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TriggerEdge {
+    /// Fire on button/key down (default).
+    #[default]
+    Press,
+    /// Fire on button/key up. Incompatible with `swallow = true`.
+    Release,
+}
+
+impl TriggerEdge {
+    pub fn from_str(s: &str) -> Result<Self, ConfigError> {
+        match s.to_lowercase().as_str() {
+            "press" => Ok(TriggerEdge::Press),
+            "release" => Ok(TriggerEdge::Release),
+            _ => Err(ConfigError::Validation(format!(
+                "Unknown trigger edge: '{}'. Expected 'press' or 'release'",
+                s
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum MouseButton {
@@ -273,14 +297,14 @@ pub struct ButtonBinding {
     pub hold_threshold_ms: Option<u32>,
     /// Layer filter — None means active in all layers
     pub layer: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeviceBinding {
-    pub device_match: DeviceMatch,
-    pub button_bindings: Vec<ButtonBinding>,
-    pub scroll_bindings: Vec<ScrollBinding>,
-    pub exclusive: bool,
+    /// When true, the input event is consumed and not forwarded to the application.
+    /// Requires `exclusive = true` on the device. Default: false.
+    #[serde(default)]
+    pub swallow: bool,
+    /// Whether to fire the trigger on press or release. Default: Press.
+    /// `on = Release` is incompatible with `swallow = true`.
+    #[serde(default)]
+    pub on: TriggerEdge,
 }
 
 /// Binding that maps a scroll direction to a trigger.
@@ -289,6 +313,24 @@ pub struct ScrollBinding {
     pub direction: ScrollDirection,
     pub trigger_id: String,
     pub layer: Option<String>,
+    /// When true, the scroll event is consumed and not forwarded. Requires `exclusive = true`.
+    #[serde(default)]
+    pub swallow: bool,
+}
+
+/// A single input binding — either a button/key binding or a scroll binding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum Binding {
+    Button(ButtonBinding),
+    Scroll(ScrollBinding),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceBinding {
+    pub device_match: DeviceMatch,
+    /// Unified list of input bindings (button, key, scroll, or chords thereof).
+    pub bindings: Vec<Binding>,
+    pub exclusive: bool,
 }
 
 /// Rule for automatic profile/layer switching based on active window.
@@ -516,26 +558,71 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
     let trigger_ids: std::collections::HashSet<&str> =
         config.triggers.iter().map(|t| t.id.as_str()).collect();
 
+    // Build a map for trigger mode lookups (for on=Release + Hold validation)
+    let trigger_modes: std::collections::HashMap<&str, TriggerMode> = config
+        .triggers
+        .iter()
+        .map(|t| (t.id.as_str(), t.mode))
+        .collect();
+
     for binding in &config.device_bindings {
-        for btn in &binding.button_bindings {
-            if !trigger_ids.contains(btn.trigger_id.as_str()) {
-                errors.push(ConfigError::UnknownTriggerRef(btn.trigger_id.clone()));
-            }
-            if let Some(ref hold_id) = btn.hold_trigger_id {
-                if !trigger_ids.contains(hold_id.as_str()) {
-                    errors.push(ConfigError::UnknownTriggerRef(hold_id.clone()));
+        for b in &binding.bindings {
+            match b {
+                Binding::Button(btn) => {
+                    if !trigger_ids.contains(btn.trigger_id.as_str()) {
+                        errors.push(ConfigError::UnknownTriggerRef(btn.trigger_id.clone()));
+                    }
+                    if let Some(ref hold_id) = btn.hold_trigger_id {
+                        if !trigger_ids.contains(hold_id.as_str()) {
+                            errors.push(ConfigError::UnknownTriggerRef(hold_id.clone()));
+                        }
+                    }
+                    if btn.swallow && !binding.exclusive {
+                        errors.push(ConfigError::Validation(format!(
+                            "button binding for trigger '{}': swallow=true requires exclusive=true",
+                            btn.trigger_id
+                        )));
+                    }
+                    if btn.on == TriggerEdge::Release && btn.swallow {
+                        errors.push(ConfigError::Validation(format!(
+                            "button binding for trigger '{}': on=release is incompatible with swallow=true",
+                            btn.trigger_id
+                        )));
+                    }
+                    if btn.on == TriggerEdge::Release && btn.hold_trigger_id.is_some() {
+                        errors.push(ConfigError::Validation(format!(
+                            "button binding for trigger '{}': on=release is incompatible with hold_trigger",
+                            btn.trigger_id
+                        )));
+                    }
+                    if btn.on == TriggerEdge::Release {
+                        if let Some(&mode) = trigger_modes.get(btn.trigger_id.as_str()) {
+                            if mode == TriggerMode::Hold {
+                                errors.push(ConfigError::Validation(format!(
+                                    "button binding for trigger '{}': on=release is incompatible with hold-mode triggers",
+                                    btn.trigger_id
+                                )));
+                            }
+                        }
+                    }
                 }
-            }
-        }
-        for scroll in &binding.scroll_bindings {
-            if !trigger_ids.contains(scroll.trigger_id.as_str()) {
-                errors.push(ConfigError::UnknownTriggerRef(scroll.trigger_id.clone()));
-            }
-            if !binding.exclusive {
-                errors.push(ConfigError::Validation(format!(
-                    "scroll binding for trigger '{}' requires exclusive=true",
-                    scroll.trigger_id
-                )));
+                Binding::Scroll(scroll) => {
+                    if !trigger_ids.contains(scroll.trigger_id.as_str()) {
+                        errors.push(ConfigError::UnknownTriggerRef(scroll.trigger_id.clone()));
+                    }
+                    if !binding.exclusive {
+                        errors.push(ConfigError::Validation(format!(
+                            "scroll binding for trigger '{}' requires exclusive=true",
+                            scroll.trigger_id
+                        )));
+                    }
+                    if scroll.swallow && !binding.exclusive {
+                        errors.push(ConfigError::Validation(format!(
+                            "scroll binding for trigger '{}': swallow=true requires exclusive=true",
+                            scroll.trigger_id
+                        )));
+                    }
+                }
             }
         }
     }
@@ -802,15 +889,16 @@ mod tests {
                 device_match: DeviceMatch::ByName {
                     contains: "test".into(),
                 },
-                button_bindings: vec![ButtonBinding {
+                bindings: vec![Binding::Button(ButtonBinding {
                     codes: vec![0x110],
                     code_names: vec!["BTN_LEFT".into()],
                     trigger_id: "nonexistent".into(),
                     hold_trigger_id: None,
                     hold_threshold_ms: None,
                     layer: None,
-                }],
-                scroll_bindings: vec![],
+                    swallow: false,
+                    on: TriggerEdge::Press,
+                })],
                 exclusive: false,
             }],
             profile_rules: vec![],
@@ -908,6 +996,7 @@ mod tests {
             direction: ScrollDirection::Up,
             trigger_id: "click".into(),
             layer: None,
+            swallow: false,
         };
         assert_eq!(sb.direction, ScrollDirection::Up);
         assert_eq!(sb.trigger_id, "click");
@@ -919,6 +1008,7 @@ mod tests {
             direction: ScrollDirection::Up,
             trigger_id: "click".into(),
             layer: None,
+            swallow: false,
         };
         assert_eq!(sb.direction, ScrollDirection::Up);
         assert_ne!(sb.direction, ScrollDirection::Down);
@@ -939,12 +1029,12 @@ mod tests {
                 device_match: DeviceMatch::ByName {
                     contains: "test".into(),
                 },
-                button_bindings: vec![],
-                scroll_bindings: vec![ScrollBinding {
+                bindings: vec![Binding::Scroll(ScrollBinding {
                     direction: ScrollDirection::Up,
                     trigger_id: "click".into(),
                     layer: None,
-                }],
+                    swallow: false,
+                })],
                 exclusive: false, // should fail
             }],
             ..Config::default()
@@ -968,16 +1058,94 @@ mod tests {
                 device_match: DeviceMatch::ByName {
                     contains: "test".into(),
                 },
-                button_bindings: vec![],
-                scroll_bindings: vec![ScrollBinding {
+                bindings: vec![Binding::Scroll(ScrollBinding {
                     direction: ScrollDirection::Up,
                     trigger_id: "click".into(),
                     layer: None,
-                }],
+                    swallow: false,
+                })],
                 exclusive: true,
             }],
             ..Config::default()
         };
         assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validate_swallow_requires_exclusive() {
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "click".into(),
+                name: "Click".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action: ActionConfig::NoOp,
+                cooldown_ms: None,
+            }],
+            device_bindings: vec![DeviceBinding {
+                device_match: DeviceMatch::ByName {
+                    contains: "test".into(),
+                },
+                bindings: vec![Binding::Button(ButtonBinding {
+                    codes: vec![0x110],
+                    code_names: vec!["BTN_LEFT".into()],
+                    trigger_id: "click".into(),
+                    hold_trigger_id: None,
+                    hold_threshold_ms: None,
+                    layer: None,
+                    swallow: true,
+                    on: TriggerEdge::Press,
+                })],
+                exclusive: false, // should fail — swallow requires exclusive
+            }],
+            ..Config::default()
+        };
+        let errs = validate_config(&config).unwrap_err();
+        assert!(errs.iter().any(|e| e.to_string().contains("exclusive")));
+    }
+
+    #[test]
+    fn test_validate_on_release_incompatible_with_hold() {
+        let config = Config {
+            triggers: vec![
+                TriggerBinding {
+                    id: "tap".into(),
+                    name: "Tap".into(),
+                    description: String::new(),
+                    mode: TriggerMode::OneShot,
+                    action: ActionConfig::NoOp,
+                    cooldown_ms: None,
+                },
+                TriggerBinding {
+                    id: "hold".into(),
+                    name: "Hold".into(),
+                    description: String::new(),
+                    mode: TriggerMode::OneShot,
+                    action: ActionConfig::NoOp,
+                    cooldown_ms: None,
+                },
+            ],
+            device_bindings: vec![DeviceBinding {
+                device_match: DeviceMatch::ByName {
+                    contains: "test".into(),
+                },
+                bindings: vec![Binding::Button(ButtonBinding {
+                    codes: vec![0x110],
+                    code_names: vec!["BTN_LEFT".into()],
+                    trigger_id: "tap".into(),
+                    hold_trigger_id: Some("hold".into()),
+                    hold_threshold_ms: Some(500),
+                    layer: None,
+                    swallow: false,
+                    on: TriggerEdge::Release, // incompatible with hold_trigger_id
+                })],
+                exclusive: false,
+            }],
+            ..Config::default()
+        };
+        let errs = validate_config(&config).unwrap_err();
+        assert!(errs
+            .iter()
+            .any(|e| e.to_string().contains("release") || e.to_string().contains("hold")));
     }
 }
