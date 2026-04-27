@@ -10,6 +10,7 @@ use std::sync::Arc;
 use wayclick_core::config::*;
 use wayclick_core::engine::bench;
 use wayclick_core::engine::Engine;
+use wayclick_core::event_bus::EventBus;
 use wayclick_core::input_backend::NullBackend;
 use wayclick_core::logger::{LogLevel, Logger};
 
@@ -32,6 +33,7 @@ fn bench_engine(triggers: Vec<TriggerBinding>) -> Engine {
         config,
         null_backend(),
         quiet_logger(),
+        Arc::new(EventBus::new()),
         "/dev/null".to_string(),
     )
 }

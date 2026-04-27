@@ -1,4 +1,5 @@
 use crate::config::*;
+use crate::event_bus::{Event, EventBus};
 use crate::input_backend::{BackendError, InputBackend};
 use crate::logger::Logger;
 use rand::Rng;
@@ -20,6 +21,10 @@ pub enum EngineError {
     Cooldown,
     #[error("Backend error: {0}")]
     Backend(#[from] BackendError),
+    #[error("Trigger ID already exists: {0}")]
+    DuplicateTrigger(String),
+    #[error("Trigger not found or not owned by this connection: {0}")]
+    NotOwned(String),
 }
 
 enum TriggerState {
@@ -40,6 +45,8 @@ pub struct TriggerSnapshot {
     pub mode: TriggerMode,
     pub action_type: String,
     pub active: bool,
+    /// `true` if this trigger was registered dynamically via IPC.
+    pub dynamic: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -54,11 +61,21 @@ pub struct StatusReport {
     pub uptime_secs: u64,
 }
 
+/// A trigger registered at runtime via IPC, owned by a connection.
+struct DynamicTriggerEntry {
+    trigger: TriggerBinding,
+    owner_connection_id: u64,
+}
+
 pub struct Engine {
     config: Config,
+    /// State for both static (Lua) and dynamic triggers.
     state: HashMap<String, TriggerState>,
+    /// Triggers registered at runtime via IPC.
+    dynamic_triggers: HashMap<String, DynamicTriggerEntry>,
     backend: Arc<dyn InputBackend>,
     logger: Arc<Logger>,
+    event_bus: Arc<EventBus>,
     enabled: bool,
     start_time: Instant,
     config_path: String,
@@ -70,6 +87,7 @@ impl Engine {
         config: Config,
         backend: Arc<dyn InputBackend>,
         logger: Arc<Logger>,
+        event_bus: Arc<EventBus>,
         config_path: String,
     ) -> Self {
         let mut state = HashMap::new();
@@ -79,8 +97,10 @@ impl Engine {
         Self {
             config,
             state,
+            dynamic_triggers: HashMap::new(),
             backend,
             logger,
+            event_bus,
             enabled: false,
             start_time: Instant::now(),
             config_path,
@@ -89,12 +109,24 @@ impl Engine {
     }
 
     pub fn apply_config(&mut self, config: Config) {
-        self.stop_all_workers();
-        self.state.clear();
+        // Only stop static trigger workers; dynamic triggers are preserved.
+        let static_ids: Vec<String> = self
+            .config
+            .triggers
+            .iter()
+            .map(|t| t.id.clone())
+            .collect();
+        for id in &static_ids {
+            self.stop_worker(id);
+        }
+        // Keep only dynamic trigger state entries, then add new static ones.
+        let dynamic_ids: Vec<String> = self.dynamic_triggers.keys().cloned().collect();
+        self.state.retain(|id, _| dynamic_ids.contains(id));
         for trigger in &config.triggers {
-            self.state.insert(trigger.id.clone(), TriggerState::Idle);
+            self.state.entry(trigger.id.clone()).or_insert(TriggerState::Idle);
         }
         self.config = config;
+        self.event_bus.publish(&Event::config_reloaded());
         self.logger.info("Config applied, all workers stopped");
     }
 
@@ -105,10 +137,11 @@ impl Engine {
 
     /// Set the active layer.
     pub fn set_layer(&mut self, layer: String) {
-        self.logger.info(format!(
-            "Layer changed: '{}' -> '{}'",
-            self.current_layer, layer
-        ));
+        let from = self.current_layer.clone();
+        self.logger
+            .info(format!("Layer changed: '{}' -> '{}'", from, layer));
+        self.event_bus
+            .publish(&Event::layer_changed(from, layer.clone()));
         self.current_layer = layer;
     }
 
@@ -121,6 +154,7 @@ impl Engine {
             "Engine {}",
             if enabled { "enabled" } else { "disabled" }
         ));
+        self.event_bus.publish(&Event::enabled_changed(enabled));
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -138,13 +172,19 @@ impl Engine {
             return Err(EngineError::Disabled);
         }
 
+        // Check static triggers first, then dynamic.
         let trigger = self
             .config
             .triggers
             .iter()
             .find(|t| t.id == id)
-            .ok_or_else(|| EngineError::UnknownTrigger(id.to_string()))?
-            .clone();
+            .cloned()
+            .or_else(|| {
+                self.dynamic_triggers
+                    .get(id)
+                    .map(|e| e.trigger.clone())
+            })
+            .ok_or_else(|| EngineError::UnknownTrigger(id.to_string()))?;
 
         match trigger.mode {
             TriggerMode::Toggle => {
@@ -166,10 +206,10 @@ impl Engine {
 
         match state {
             TriggerState::Active { .. } => {
-                // Stop worker
                 self.stop_worker(&trigger.id);
                 self.logger.info(format!("{}: stopped", trigger.id));
-                // Enter cooldown if configured
+                self.event_bus
+                    .publish(&Event::trigger_deactivated(trigger.id.clone()));
                 if let Some(cd) = trigger.cooldown_ms {
                     self.state.insert(
                         trigger.id.clone(),
@@ -184,12 +224,15 @@ impl Engine {
                 if Instant::now() < *until {
                     return Err(EngineError::Cooldown);
                 }
-                // Cooldown expired, start worker
                 self.start_worker(trigger)?;
+                self.event_bus
+                    .publish(&Event::trigger_activated(trigger.id.clone()));
                 Ok(())
             }
             TriggerState::Idle => {
                 self.start_worker(trigger)?;
+                self.event_bus
+                    .publish(&Event::trigger_activated(trigger.id.clone()));
                 Ok(())
             }
         }
@@ -202,13 +245,16 @@ impl Engine {
                 TriggerState::Active { .. } => Ok(()), // Already active
                 _ => {
                     self.start_worker(trigger)?;
+                    self.event_bus
+                        .publish(&Event::trigger_activated(trigger.id.clone()));
                     Ok(())
                 }
             }
         } else {
-            // Release
             self.stop_worker(&trigger.id);
             self.logger.info(format!("{}: released", trigger.id));
+            self.event_bus
+                .publish(&Event::trigger_deactivated(trigger.id.clone()));
             Ok(())
         }
     }
@@ -217,17 +263,24 @@ impl Engine {
         self.logger
             .info(format!("{}: oneshot executing", trigger.id));
 
+        self.event_bus
+            .publish(&Event::trigger_activated(trigger.id.clone()));
+
         // Handle SetLayer directly (needs mutable self access)
         if let ActionConfig::SetLayer { ref layer } = trigger.action {
             self.set_layer(layer.clone());
             self.logger
                 .info(format!("{}: oneshot complete", trigger.id));
+            self.event_bus
+                .publish(&Event::trigger_deactivated(trigger.id.clone()));
             return Ok(());
         }
 
         execute_action_sync(&trigger.action, &self.backend, &self.logger)?;
         self.logger
             .info(format!("{}: oneshot complete", trigger.id));
+        self.event_bus
+            .publish(&Event::trigger_deactivated(trigger.id.clone()));
         Ok(())
     }
 
@@ -285,7 +338,7 @@ impl Engine {
         StatusReport {
             enabled: self.enabled,
             dry_run: self.config.options.dry_run,
-            trigger_count: self.config.triggers.len(),
+            trigger_count: self.config.triggers.len() + self.dynamic_triggers.len(),
             active_triggers,
             current_layer: self.current_layer.clone(),
             backend: self.backend.name().to_string(),
@@ -295,7 +348,8 @@ impl Engine {
     }
 
     pub fn triggers_snapshot(&self) -> Vec<TriggerSnapshot> {
-        self.config
+        let mut snapshots: Vec<TriggerSnapshot> = self
+            .config
             .triggers
             .iter()
             .map(|t| {
@@ -306,13 +360,109 @@ impl Engine {
                     mode: t.mode,
                     action_type: t.action.type_name().to_string(),
                     active,
+                    dynamic: false,
                 }
             })
-            .collect()
+            .collect();
+
+        for (id, entry) in &self.dynamic_triggers {
+            let active = matches!(self.state.get(id), Some(TriggerState::Active { .. }));
+            snapshots.push(TriggerSnapshot {
+                id: id.clone(),
+                name: entry.trigger.name.clone(),
+                mode: entry.trigger.mode,
+                action_type: entry.trigger.action.type_name().to_string(),
+                active,
+                dynamic: true,
+            });
+        }
+
+        snapshots
+    }
+
+    /// Register a trigger dynamically via IPC.
+    pub fn register_dynamic_trigger(
+        &mut self,
+        trigger: TriggerBinding,
+        owner_connection_id: u64,
+    ) -> Result<(), EngineError> {
+        let id = &trigger.id;
+        if self.config.triggers.iter().any(|t| &t.id == id) {
+            return Err(EngineError::DuplicateTrigger(id.clone()));
+        }
+        if self.dynamic_triggers.contains_key(id) {
+            return Err(EngineError::DuplicateTrigger(id.clone()));
+        }
+        self.state.insert(id.clone(), TriggerState::Idle);
+        self.dynamic_triggers.insert(
+            id.clone(),
+            DynamicTriggerEntry {
+                trigger,
+                owner_connection_id,
+            },
+        );
+        Ok(())
+    }
+
+    /// Unregister a dynamic trigger; only the owning connection may do this.
+    pub fn unregister_dynamic_trigger(
+        &mut self,
+        id: &str,
+        owner_connection_id: u64,
+    ) -> Result<(), EngineError> {
+        let entry = self
+            .dynamic_triggers
+            .get(id)
+            .ok_or_else(|| EngineError::NotOwned(id.to_string()))?;
+        if entry.owner_connection_id != owner_connection_id {
+            return Err(EngineError::NotOwned(id.to_string()));
+        }
+        self.stop_worker(id);
+        self.state.remove(id);
+        self.dynamic_triggers.remove(id);
+        Ok(())
+    }
+
+    /// Remove all dynamic triggers owned by a connection (called on connection close).
+    pub fn cleanup_connection(&mut self, owner_connection_id: u64) {
+        let owned: Vec<String> = self
+            .dynamic_triggers
+            .iter()
+            .filter(|(_, e)| e.owner_connection_id == owner_connection_id)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in owned {
+            self.stop_worker(&id);
+            self.state.remove(&id);
+            self.dynamic_triggers.remove(&id);
+        }
     }
 
     pub fn config(&self) -> &Config {
         &self.config
+    }
+
+    /// Return the dynamic triggers owned by a specific connection.
+    pub fn dynamic_triggers_for_connection(
+        &self,
+        owner_connection_id: u64,
+    ) -> Vec<TriggerSnapshot> {
+        self.dynamic_triggers
+            .iter()
+            .filter(|(_, e)| e.owner_connection_id == owner_connection_id)
+            .map(|(id, entry)| {
+                let active =
+                    matches!(self.state.get(id), Some(TriggerState::Active { .. }));
+                TriggerSnapshot {
+                    id: id.clone(),
+                    name: entry.trigger.name.clone(),
+                    mode: entry.trigger.mode,
+                    action_type: entry.trigger.action.type_name().to_string(),
+                    active,
+                    dynamic: true,
+                }
+            })
+            .collect()
     }
 }
 
@@ -823,7 +973,7 @@ mod tests {
             device_bindings: vec![],
             profile_rules: vec![],
         };
-        let engine = Engine::new(config, Arc::new(backend), logger, "test".into());
+        let engine = Engine::new(config, Arc::new(backend), logger, Arc::new(EventBus::new()), "test".into());
         (engine, calls)
     }
 

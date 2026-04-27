@@ -594,6 +594,7 @@ mod tests {
     use super::*;
     use crate::config::*;
     use crate::engine::Engine;
+    use crate::event_bus::EventBus;
     use crate::evdev_source::InputEvent;
     use crate::input_backend::MockBackend;
     use crate::logger::LogLevel;
@@ -749,6 +750,7 @@ mod tests {
             config,
             Arc::new(backend),
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         engine.lock().unwrap().set_enabled(true);
@@ -852,6 +854,7 @@ mod tests {
             config,
             Arc::new(backend),
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         engine.lock().unwrap().set_enabled(true);
@@ -945,6 +948,7 @@ mod tests {
             config,
             Arc::new(backend),
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         engine.lock().unwrap().set_enabled(true);
@@ -1287,6 +1291,7 @@ mod tests {
             config,
             Arc::new(backend),
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         // Engine is DISABLED — events should NOT be claimed
@@ -1418,6 +1423,7 @@ mod tests {
             config,
             Arc::new(backend),
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         engine.lock().unwrap().set_enabled(true);
@@ -1651,6 +1657,7 @@ mod tests {
             config,
             Arc::new(backend),
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         engine.lock().unwrap().set_enabled(true);
@@ -1690,6 +1697,7 @@ mod tests {
             config,
             Arc::new(backend),
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         engine.lock().unwrap().set_enabled(true);
@@ -1755,6 +1763,7 @@ mod tests {
             config,
             Arc::new(backend),
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         engine.lock().unwrap().set_enabled(true);

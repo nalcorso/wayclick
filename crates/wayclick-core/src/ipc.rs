@@ -1,10 +1,13 @@
+use crate::config::{TriggerBinding, TriggerMode};
 use crate::engine::Engine;
+use crate::event_bus::{EventBus, EventType};
 use crate::logger::Logger;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::io::{self, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -226,13 +229,33 @@ impl Drop for ConnectionGuard {
     }
 }
 
+/// Messages sent from the reader and event-forwarder threads to the writer thread.
+enum WriterMsg {
+    Frame(Value),
+    Close,
+}
+
+/// Deserialization helper for `register_trigger` params (name and description are optional).
+#[derive(Deserialize)]
+struct RegisterTriggerParams {
+    id: String,
+    #[serde(default)]
+    name: Option<String>,
+    mode: TriggerMode,
+    action: crate::config::ActionConfig,
+    #[serde(default)]
+    cooldown_ms: Option<u32>,
+}
+
 pub struct IpcServer {
     socket_path: PathBuf,
     listener: Option<UnixListener>,
     engine: Arc<Mutex<Engine>>,
     logger: Arc<Logger>,
+    event_bus: Arc<EventBus>,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     connection_count: Arc<AtomicUsize>,
+    connection_id_counter: Arc<AtomicU64>,
 }
 
 impl IpcServer {
@@ -240,6 +263,7 @@ impl IpcServer {
         socket_path: PathBuf,
         engine: Arc<Mutex<Engine>>,
         logger: Arc<Logger>,
+        event_bus: Arc<EventBus>,
     ) -> Result<Self, IpcError> {
         // Remove existing socket
         let _ = std::fs::remove_file(&socket_path);
@@ -269,8 +293,10 @@ impl IpcServer {
             listener: Some(listener),
             engine,
             logger,
+            event_bus,
             shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             connection_count: Arc::new(AtomicUsize::new(0)),
+            connection_id_counter: Arc::new(AtomicU64::new(1)),
         })
     }
 
@@ -305,12 +331,16 @@ impl IpcServer {
 
                     let engine = self.engine.clone();
                     let logger = self.logger.clone();
+                    let event_bus = self.event_bus.clone();
+                    let conn_id = self
+                        .connection_id_counter
+                        .fetch_add(1, Ordering::Relaxed);
                     let guard = ConnectionGuard {
                         counter: self.connection_count.clone(),
                     };
                     thread::spawn(move || {
                         let _guard = guard;
-                        handle_client(stream, engine, logger);
+                        handle_client(stream, engine, logger, event_bus, conn_id);
                     });
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -338,18 +368,53 @@ impl Drop for IpcServer {
     }
 }
 
-fn handle_client(mut stream: UnixStream, engine: Arc<Mutex<Engine>>, logger: Arc<Logger>) {
-    stream.set_nonblocking(false).unwrap_or_default();
-    stream
+fn handle_client(
+    stream: UnixStream,
+    engine: Arc<Mutex<Engine>>,
+    logger: Arc<Logger>,
+    event_bus: Arc<EventBus>,
+    conn_id: u64,
+) {
+    // Bounded writer channel — prevents unbounded memory growth from slow writers.
+    let (writer_tx, writer_rx) = std::sync::mpsc::sync_channel::<WriterMsg>(64);
+
+    let mut stream_read = stream;
+    let stream_write = match stream_read.try_clone() {
+        Ok(s) => s,
+        Err(e) => {
+            logger.debug(format!("IPC stream clone error: {}", e));
+            return;
+        }
+    };
+
+    stream_read.set_nonblocking(false).unwrap_or_default();
+    stream_read
         .set_read_timeout(Some(Duration::from_secs(30)))
         .unwrap_or_default();
 
+    // Writer thread: drains WriterMsg channel and sends frames to the socket.
+    let writer_tx_for_writer = writer_tx.clone();
+    let writer_handle = thread::spawn(move || {
+        handle_client_writer(stream_write, writer_rx);
+        drop(writer_tx_for_writer);
+    });
+
+    // Subscription state for this connection.
+    let mut sub_stop_tx: Option<std::sync::mpsc::Sender<()>> = None;
+
     loop {
-        match decode_frame(&mut stream) {
+        match decode_frame(&mut stream_read) {
             Ok(request) => {
-                let response = handle_request(&request, &engine, &logger);
-                if let Err(e) = write_frame(&mut stream, &response) {
-                    logger.debug(format!("IPC write error: {}", e));
+                let response = handle_request_with_conn(
+                    &request,
+                    &engine,
+                    &logger,
+                    conn_id,
+                    &event_bus,
+                    &writer_tx,
+                    &mut sub_stop_tx,
+                );
+                if writer_tx.send(WriterMsg::Frame(response)).is_err() {
                     break;
                 }
             }
@@ -360,6 +425,197 @@ fn handle_client(mut stream: UnixStream, engine: Arc<Mutex<Engine>>, logger: Arc
             }
         }
     }
+
+    // Stop subscription forwarder (drops the EventBus subscriber).
+    if let Some(tx) = sub_stop_tx.take() {
+        let _ = tx.send(());
+    }
+
+    // Clean up all dynamic triggers registered by this connection.
+    engine.lock().unwrap().cleanup_connection(conn_id);
+
+    // Signal writer to stop and wait for it.
+    let _ = writer_tx.send(WriterMsg::Close);
+    writer_handle.join().ok();
+}
+
+fn handle_client_writer(mut stream: UnixStream, rx: std::sync::mpsc::Receiver<WriterMsg>) {
+    for msg in rx {
+        match msg {
+            WriterMsg::Frame(val) => {
+                if write_frame(&mut stream, &val).is_err() {
+                    break;
+                }
+            }
+            WriterMsg::Close => break,
+        }
+    }
+}
+
+/// Handle a JSON-RPC request with full connection context.
+/// Falls through to `handle_request` for methods that don't need connection state.
+fn handle_request_with_conn(
+    request: &Value,
+    engine: &Arc<Mutex<Engine>>,
+    logger: &Arc<Logger>,
+    conn_id: u64,
+    event_bus: &Arc<EventBus>,
+    writer_tx: &std::sync::mpsc::SyncSender<WriterMsg>,
+    sub_stop_tx: &mut Option<std::sync::mpsc::Sender<()>>,
+) -> Value {
+    let id = request.get("id");
+    let method = request.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let params = request.get("params");
+
+    match method {
+        "subscribe" => {
+            // Stop existing subscription before creating a new one.
+            if let Some(tx) = sub_stop_tx.take() {
+                let _ = tx.send(());
+            }
+
+            let filter = parse_event_filter(params);
+            let event_rx = event_bus.subscribe(filter.clone());
+            let (stop_tx, stop_rx) = std::sync::mpsc::channel::<()>();
+            *sub_stop_tx = Some(stop_tx);
+
+            let writer_tx_clone = writer_tx.clone();
+            thread::spawn(move || {
+                loop {
+                    if stop_rx.try_recv().is_ok() {
+                        break;
+                    }
+                    match event_rx.recv_timeout(Duration::from_millis(50)) {
+                        Ok(event) => {
+                            // Re-check stop before forwarding to close the race window
+                            // between unsubscribe sending the stop signal and this thread
+                            // waking up from recv_timeout.
+                            if stop_rx.try_recv().is_ok() {
+                                break;
+                            }
+                            let notification = json!({
+                                "jsonrpc": "2.0",
+                                "id": Value::Null,
+                                "method": "event",
+                                "params": serde_json::to_value(&event).unwrap_or(json!(null)),
+                            });
+                            if writer_tx_clone.send(WriterMsg::Frame(notification)).is_err() {
+                                break;
+                            }
+                        }
+                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    }
+                }
+            });
+
+            let subscribed_types = match &filter {
+                None => json!("all"),
+                Some(types) => {
+                    json!(types.iter().map(|t| serde_json::to_value(t).unwrap_or(json!(null))).collect::<Vec<_>>())
+                }
+            };
+            make_response(id, json!({ "subscribed": true, "events": subscribed_types }))
+        }
+
+        "unsubscribe" => {
+            if let Some(tx) = sub_stop_tx.take() {
+                let _ = tx.send(());
+            }
+            make_response(id, json!({ "subscribed": false }))
+        }
+
+        "register_trigger" => {
+            let params = match params {
+                Some(p) => p,
+                None => return make_error(id, -32602, "Missing params"),
+            };
+            let rtp: RegisterTriggerParams = match serde_json::from_value(params.clone()) {
+                Ok(p) => p,
+                Err(e) => {
+                    return make_error(id, -32602, &format!("Invalid params: {}", e));
+                }
+            };
+            let trigger_id = rtp.id.clone();
+            let trigger = TriggerBinding {
+                id: rtp.id.clone(),
+                name: rtp.name.unwrap_or_else(|| rtp.id.clone()),
+                description: String::new(),
+                mode: rtp.mode,
+                action: rtp.action,
+                cooldown_ms: rtp.cooldown_ms,
+            };
+
+            // Validate using existing config validation.
+            let test_config = {
+                let eng = engine.lock().unwrap();
+                let mut cfg = eng.config().clone();
+                cfg.triggers = vec![trigger.clone()];
+                cfg
+            };
+            if let Err(errs) = crate::config::validate_config(&test_config) {
+                let msg = errs
+                    .iter()
+                    .map(|e| e.to_string())
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                return make_error(id, -32602, &format!("Validation error: {}", msg));
+            }
+
+            match engine
+                .lock()
+                .unwrap()
+                .register_dynamic_trigger(trigger, conn_id)
+            {
+                Ok(()) => make_response(id, json!({ "registered": trigger_id })),
+                Err(e) => make_error(id, -32000, &e.to_string()),
+            }
+        }
+
+        "unregister_trigger" => {
+            let tid = params
+                .and_then(|p| p.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if tid.is_empty() {
+                return make_error(id, -32602, "Missing 'id' parameter");
+            }
+            match engine
+                .lock()
+                .unwrap()
+                .unregister_dynamic_trigger(tid, conn_id)
+            {
+                Ok(()) => make_response(id, json!({ "unregistered": tid })),
+                Err(e) => make_error(id, -32000, &e.to_string()),
+            }
+        }
+
+        "list_dynamic_triggers" => {
+            let triggers = engine
+                .lock()
+                .unwrap()
+                .dynamic_triggers_for_connection(conn_id);
+            make_response(id, serde_json::to_value(&triggers).unwrap_or(json!([])))
+        }
+
+        _ => handle_request(request, engine, logger),
+    }
+}
+
+/// Parse an optional event filter from subscribe params.
+/// `None` params or absent/null `events` field → subscribe to all.
+fn parse_event_filter(params: Option<&Value>) -> Option<Vec<EventType>> {
+    let events = params?.get("events")?;
+    if events.is_null() {
+        return None;
+    }
+    let arr = events.as_array()?;
+    let types: Vec<EventType> = arr
+        .iter()
+        .filter_map(|v| v.as_str())
+        .filter_map(EventType::from_str)
+        .collect();
+    if types.is_empty() { None } else { Some(types) }
 }
 
 /// Client-side helper: connect to daemon and send a single request, return response.
@@ -387,6 +643,7 @@ pub fn ipc_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::event_bus::EventBus;
 
     #[test]
     fn test_frame_encode_decode() {
@@ -429,6 +686,7 @@ mod tests {
             config,
             backend,
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
 
@@ -451,6 +709,7 @@ mod tests {
             config,
             backend,
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
 
@@ -474,6 +733,7 @@ mod tests {
             config,
             backend,
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
 
@@ -496,6 +756,7 @@ mod tests {
             config,
             backend,
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
         engine.lock().unwrap().set_enabled(true);
@@ -520,6 +781,7 @@ mod tests {
             config,
             backend,
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
 
@@ -548,6 +810,7 @@ mod tests {
             config,
             backend,
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
 
@@ -572,13 +835,14 @@ mod tests {
             config,
             backend,
             logger.clone(),
+            Arc::new(EventBus::new()),
             "test".into(),
         )));
 
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("test.sock");
 
-        let server = IpcServer::new(socket_path.clone(), engine, logger).unwrap();
+        let server = IpcServer::new(socket_path.clone(), engine, logger, Arc::new(EventBus::new())).unwrap();
         let shutdown = server.shutdown_flag();
 
         let server_handle = thread::spawn(move || {

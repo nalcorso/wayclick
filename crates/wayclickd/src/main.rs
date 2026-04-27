@@ -7,6 +7,7 @@ use std::time::Duration;
 use wayclick_core::config::{effective_socket_path, Config};
 use wayclick_core::config_watcher::ConfigWatcher;
 use wayclick_core::engine::Engine;
+use wayclick_core::event_bus::EventBus;
 use wayclick_core::evdev_monitor::EvdevMonitor;
 use wayclick_core::input_backend::{InputBackend, LoggingBackend};
 use wayclick_core::ipc::IpcServer;
@@ -120,6 +121,9 @@ fn main() {
 
     let socket_path = effective_socket_path(&config);
 
+    // Create shared event bus
+    let event_bus = Arc::new(EventBus::new());
+
     // Create backend: UinputBackend for real mode, LoggingBackend for dry-run
     let backend: Arc<dyn wayclick_core::input_backend::InputBackend> = if config.options.dry_run {
         logger.info("Starting in dry-run mode (LoggingBackend)");
@@ -147,6 +151,7 @@ fn main() {
         config.clone(),
         backend.clone(),
         logger.clone(),
+        event_bus.clone(),
         cli.config.clone(),
     )));
 
@@ -156,7 +161,12 @@ fn main() {
     }
 
     // Start IPC server
-    let ipc_server = match IpcServer::new(socket_path.clone(), engine.clone(), logger.clone()) {
+    let ipc_server = match IpcServer::new(
+        socket_path.clone(),
+        engine.clone(),
+        logger.clone(),
+        event_bus.clone(),
+    ) {
         Ok(s) => Arc::new(s),
         Err(e) => {
             logger.error(format!("Failed to start IPC server: {}", e));

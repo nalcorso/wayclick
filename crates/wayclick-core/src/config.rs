@@ -158,9 +158,12 @@ pub enum CompositeMode {
 pub enum ActionConfig {
     AutoClick {
         button: MouseButton,
+        #[serde(default = "default_auto_click_interval_ms")]
         interval_ms: u32,
         duration_ms: Option<u32>,
+        #[serde(default)]
         jitter_ms: u32,
+        #[serde(default)]
         hold_ms: u32,
     },
     KeyPress {
@@ -170,8 +173,10 @@ pub enum ActionConfig {
         modifier_names: Vec<String>,
         #[serde(default)]
         modifier_codes: Vec<u32>,
+        #[serde(default = "default_key_press_interval_ms")]
         interval_ms: u32,
         duration_ms: Option<u32>,
+        #[serde(default)]
         jitter_ms: u32,
     },
     /// Single chord keystroke (oneshot-only).
@@ -179,22 +184,32 @@ pub enum ActionConfig {
     Keystroke {
         key_name: String,
         key_code: u32,
+        #[serde(default)]
         modifier_names: Vec<String>,
+        #[serde(default)]
         modifier_codes: Vec<u32>,
+        #[serde(default)]
         hold_ms: u32,
     },
     ScrollWheel {
         direction: ScrollDirection,
+        #[serde(default = "default_scroll_amount")]
         amount: i32,
+        #[serde(default = "default_scroll_interval_ms")]
         interval_ms: u32,
         duration_ms: Option<u32>,
+        #[serde(default)]
         jitter_ms: u32,
     },
     MouseMove {
+        #[serde(default)]
         dx: i32,
+        #[serde(default)]
         dy: i32,
+        #[serde(default = "default_mouse_move_interval_ms")]
         interval_ms: u32,
         duration_ms: Option<u32>,
+        #[serde(default)]
         jitter_ms: u32,
     },
     MouseMoveAbsolute {
@@ -205,7 +220,9 @@ pub enum ActionConfig {
         x: i32,
         y: i32,
         button: MouseButton,
+        #[serde(default)]
         hold_ms: u32,
+        #[serde(default)]
         settle_ms: u32,
     },
     Drag {
@@ -214,6 +231,7 @@ pub enum ActionConfig {
         to_x: i32,
         to_y: i32,
         button: MouseButton,
+        #[serde(default = "default_drag_duration_ms")]
         duration_ms: u32,
     },
     SetLayer {
@@ -228,6 +246,13 @@ pub enum ActionConfig {
     },
     NoOp,
 }
+
+fn default_auto_click_interval_ms() -> u32 { 50 }
+fn default_key_press_interval_ms() -> u32 { 50 }
+fn default_scroll_interval_ms() -> u32 { 100 }
+fn default_mouse_move_interval_ms() -> u32 { 16 }
+fn default_scroll_amount() -> i32 { 3 }
+fn default_drag_duration_ms() -> u32 { 500 }
 
 impl ActionConfig {
     pub fn type_name(&self) -> &str {
