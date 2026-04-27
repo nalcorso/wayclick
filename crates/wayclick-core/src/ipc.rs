@@ -543,28 +543,20 @@ fn handle_request_with_conn(
                 cooldown_ms: rtp.cooldown_ms,
             };
 
-            // Validate using existing config validation.
-            let test_config = {
-                let eng = engine.lock().unwrap();
-                let mut cfg = eng.config().clone();
-                cfg.triggers = vec![trigger.clone()];
-                cfg
-            };
-            if let Err(errs) = crate::config::validate_config(&test_config) {
-                let msg = errs
-                    .iter()
-                    .map(|e| e.to_string())
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                return make_error(id, -32602, &format!("Validation error: {}", msg));
-            }
-
+            // Validation and duplicate-checking are handled inside the engine so
+            // that dynamic triggers and static config are both subject to the same rules.
             match engine
                 .lock()
                 .unwrap()
                 .register_dynamic_trigger(trigger, conn_id)
             {
                 Ok(()) => make_response(id, json!({ "registered": trigger_id })),
+                Err(crate::engine::EngineError::DuplicateTrigger(t)) => {
+                    make_error(id, -32602, &format!("Duplicate trigger ID: {}", t))
+                }
+                Err(crate::engine::EngineError::InvalidConfig(msg)) => {
+                    make_error(id, -32602, &format!("Validation error: {}", msg))
+                }
                 Err(e) => make_error(id, -32000, &e.to_string()),
             }
         }

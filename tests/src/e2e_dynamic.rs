@@ -191,4 +191,87 @@ mod tests {
 
         daemon.teardown();
     }
+
+    /// Registering a dynamic trigger with interval_ms above MAX_INTERVAL_MS returns -32602.
+    #[test]
+    fn test_register_dynamic_trigger_rejects_excessive_interval() {
+        use wayclick_core::MAX_INTERVAL_MS;
+        let daemon = TestDaemon::new(Config::default());
+        let mut sock = daemon.connect();
+
+        let resp = ipc_call_raw(
+            &mut sock,
+            1,
+            "register_trigger",
+            json!({
+                "id": "too_slow",
+                "mode": "toggle",
+                "action": {"type": "auto_click", "button": "left", "interval_ms": MAX_INTERVAL_MS + 1}
+            }),
+        );
+        assert_eq!(
+            resp["error"]["code"], -32602,
+            "Expected invalid-params error for interval above MAX_INTERVAL_MS"
+        );
+        daemon.teardown();
+    }
+
+    /// A valid dynamic trigger can be registered even when the static config has device_bindings
+    /// that reference static triggers. The old IPC pre-validation path would falsely reject
+    /// this because it replaced the trigger list with only the new trigger, making static
+    /// binding references appear invalid.
+    #[test]
+    fn test_register_dynamic_trigger_succeeds_with_static_device_bindings() {
+        use wayclick_core::config::{
+            ActionConfig, Binding, ButtonBinding, DeviceBinding, DeviceMatch,
+            TriggerBinding, TriggerEdge, TriggerMode,
+        };
+
+        let static_trigger = TriggerBinding {
+            id: "static_click".into(),
+            name: "Static Click".into(),
+            description: String::new(),
+            mode: TriggerMode::OneShot,
+            action: ActionConfig::NoOp,
+            cooldown_ms: None,
+        };
+        let config = Config {
+            triggers: vec![static_trigger],
+            device_bindings: vec![DeviceBinding {
+                device_match: DeviceMatch::ByName {
+                    contains: "mouse".into(),
+                },
+                bindings: vec![Binding::Button(ButtonBinding {
+                    codes: vec![0x110],
+                    code_names: vec!["BTN_LEFT".into()],
+                    trigger_id: "static_click".into(),
+                    hold_trigger_id: None,
+                    hold_threshold_ms: None,
+                    layer: None,
+                    swallow: false,
+                    on: TriggerEdge::Press,
+                })],
+                exclusive: false,
+            }],
+            ..Config::default()
+        };
+        let daemon = TestDaemon::new(config);
+        let mut sock = daemon.connect();
+
+        let resp = ipc_call_raw(
+            &mut sock,
+            1,
+            "register_trigger",
+            json!({
+                "id": "dyn_ok",
+                "mode": "toggle",
+                "action": {"type": "auto_click", "button": "left", "interval_ms": 50}
+            }),
+        );
+        assert_eq!(
+            resp["result"]["registered"], "dyn_ok",
+            "Dynamic trigger should register successfully even with static device_bindings present"
+        );
+        daemon.teardown();
+    }
 }

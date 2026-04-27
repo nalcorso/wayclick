@@ -254,6 +254,10 @@ fn default_mouse_move_interval_ms() -> u32 { 16 }
 fn default_scroll_amount() -> i32 { 3 }
 fn default_drag_duration_ms() -> u32 { 500 }
 
+/// Maximum permitted interval for repeating actions (1 hour). Values above this are
+/// almost certainly a config mistake (e.g. units confusion between ms and seconds).
+pub const MAX_INTERVAL_MS: u32 = 3_600_000;
+
 impl ActionConfig {
     pub fn type_name(&self) -> &str {
         match self {
@@ -667,6 +671,13 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
                     errors.push(ConfigError::Validation(format!(
                         "interval_ms {} is below minimum {}",
                         interval_ms, min_interval
+                    )));
+                }
+                if *interval_ms > crate::MAX_INTERVAL_MS {
+                    errors.push(ConfigError::Validation(format!(
+                        "interval_ms {} exceeds maximum {}",
+                        interval_ms,
+                        crate::MAX_INTERVAL_MS
                     )));
                 }
             }
@@ -1172,5 +1183,78 @@ mod tests {
         assert!(errs
             .iter()
             .any(|e| e.to_string().contains("release") || e.to_string().contains("hold")));
+    }
+
+    #[test]
+    fn test_validate_interval_above_maximum_rejected() {
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "fast".into(),
+                name: "Fast".into(),
+                description: String::new(),
+                mode: TriggerMode::Toggle,
+                action: ActionConfig::AutoClick {
+                    button: MouseButton::Left,
+                    interval_ms: MAX_INTERVAL_MS + 1,
+                    duration_ms: None,
+                    jitter_ms: 0,
+                    hold_ms: 0,
+                },
+                cooldown_ms: None,
+            }],
+            ..Config::default()
+        };
+        let errs = validate_config(&config).unwrap_err();
+        assert!(errs.iter().any(|e| e.to_string().contains("exceeds maximum")));
+    }
+
+    #[test]
+    fn test_validate_interval_at_maximum_accepted() {
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "slow".into(),
+                name: "Slow".into(),
+                description: String::new(),
+                mode: TriggerMode::Toggle,
+                action: ActionConfig::AutoClick {
+                    button: MouseButton::Left,
+                    interval_ms: MAX_INTERVAL_MS,
+                    duration_ms: None,
+                    jitter_ms: 0,
+                    hold_ms: 0,
+                },
+                cooldown_ms: None,
+            }],
+            ..Config::default()
+        };
+        assert!(validate_config(&config).is_ok());
+    }
+
+    #[test]
+    fn test_validate_interval_above_maximum_nested() {
+        // Exceeding MAX_INTERVAL_MS inside a Composite should also be caught.
+        let action = ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            actions: vec![ActionConfig::AutoClick {
+                button: MouseButton::Left,
+                interval_ms: MAX_INTERVAL_MS + 100,
+                duration_ms: None,
+                jitter_ms: 0,
+                hold_ms: 0,
+            }],
+        };
+        let config = Config {
+            triggers: vec![TriggerBinding {
+                id: "nested".into(),
+                name: "Nested".into(),
+                description: String::new(),
+                mode: TriggerMode::OneShot,
+                action,
+                cooldown_ms: None,
+            }],
+            ..Config::default()
+        };
+        let errs = validate_config(&config).unwrap_err();
+        assert!(errs.iter().any(|e| e.to_string().contains("exceeds maximum")));
     }
 }

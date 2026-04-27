@@ -25,6 +25,8 @@ pub enum EngineError {
     DuplicateTrigger(String),
     #[error("Trigger not found or not owned by this connection: {0}")]
     NotOwned(String),
+    #[error("Invalid trigger: {0}")]
+    InvalidConfig(String),
 }
 
 enum TriggerState {
@@ -397,6 +399,21 @@ impl Engine {
         if self.dynamic_triggers.contains_key(id) {
             return Err(EngineError::DuplicateTrigger(id.clone()));
         }
+
+        // Validate action constraints using a synthetic single-trigger config so
+        // the same interval/depth/oneshot-only rules apply to dynamic triggers.
+        let mut synthetic = crate::config::Config::default();
+        synthetic.options = self.config.options.clone();
+        synthetic.triggers = vec![trigger.clone()];
+        if let Err(errs) = crate::config::validate_config(&synthetic) {
+            let msg = errs
+                .iter()
+                .map(|e| e.to_string())
+                .collect::<Vec<_>>()
+                .join("; ");
+            return Err(EngineError::InvalidConfig(msg));
+        }
+
         self.state.insert(id.clone(), TriggerState::Idle);
         self.dynamic_triggers.insert(
             id.clone(),
@@ -1447,5 +1464,43 @@ mod tests {
                 BackendCall::KeyRelease(29),
             ]
         );
+    }
+
+    #[test]
+    fn test_register_dynamic_trigger_rejects_duplicate_static_id() {
+        let (mut engine, _) = test_engine(vec![auto_click_trigger("existing", 50, TriggerMode::Toggle)]);
+        let dup = auto_click_trigger("existing", 50, TriggerMode::Toggle);
+        let result = engine.register_dynamic_trigger(dup, 1);
+        assert!(matches!(result, Err(EngineError::DuplicateTrigger(_))));
+    }
+
+    #[test]
+    fn test_register_dynamic_trigger_rejects_duplicate_dynamic_id() {
+        let (mut engine, _) = test_engine(vec![]);
+        let t = auto_click_trigger("dyn", 50, TriggerMode::Toggle);
+        engine.register_dynamic_trigger(t.clone(), 1).unwrap();
+        let result = engine.register_dynamic_trigger(t, 2);
+        assert!(matches!(result, Err(EngineError::DuplicateTrigger(_))));
+    }
+
+    #[test]
+    fn test_register_dynamic_trigger_rejects_interval_above_max() {
+        use crate::MAX_INTERVAL_MS;
+        let (mut engine, _) = test_engine(vec![]);
+        let bad = auto_click_trigger("too_slow", MAX_INTERVAL_MS + 1, TriggerMode::Toggle);
+        let result = engine.register_dynamic_trigger(bad, 1);
+        assert!(
+            matches!(result, Err(EngineError::InvalidConfig(_))),
+            "Expected InvalidConfig, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_register_dynamic_trigger_valid_succeeds() {
+        let (mut engine, _) = test_engine(vec![]);
+        let good = auto_click_trigger("valid_dyn", 50, TriggerMode::Toggle);
+        assert!(engine.register_dynamic_trigger(good, 1).is_ok());
+        assert!(engine.triggers_snapshot().iter().any(|t| t.id == "valid_dyn" && t.dynamic));
     }
 }

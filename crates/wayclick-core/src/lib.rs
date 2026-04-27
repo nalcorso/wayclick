@@ -11,4 +11,5 @@ pub mod lua_api;
 pub mod mutex_ext;
 pub mod uinput_backend;
 
+pub use config::MAX_INTERVAL_MS;
 pub use mutex_ext::MutexExt;
