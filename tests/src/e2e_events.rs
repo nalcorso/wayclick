@@ -9,6 +9,7 @@ mod tests {
     use wayclick_core::config::{
         ActionConfig, Config, TriggerBinding, TriggerMode,
     };
+    use wayclick_core::engine::with_engine_events;
     use wayclick_core::ipc::decode_frame;
 
     use crate::helpers::{ipc_call_raw, wait_for_event, TestDaemon};
@@ -87,7 +88,7 @@ mod tests {
         ipc_call_raw(&mut sock, 1, "subscribe", json!({}));
 
         // Trigger the event at the engine level (IPC reload_config is a stub that does not reload)
-        daemon.engine.lock().unwrap().apply_config(Config::default());
+        with_engine_events(&daemon.engine, |eng| eng.apply_config(Config::default()));
 
         let event = wait_for_event(&mut sock, "config_reloaded", Duration::from_secs(3));
         assert!(event.is_some(), "Expected config_reloaded event");

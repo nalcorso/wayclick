@@ -6,7 +6,7 @@ use std::thread;
 use std::time::Duration;
 use wayclick_core::config::{effective_socket_path, Config};
 use wayclick_core::config_watcher::ConfigWatcher;
-use wayclick_core::engine::Engine;
+use wayclick_core::engine::{with_engine_events, Engine};
 use wayclick_core::event_bus::EventBus;
 use wayclick_core::evdev_monitor::EvdevMonitor;
 use wayclick_core::input_backend::{InputBackend, LoggingBackend};
@@ -157,7 +157,7 @@ fn main() {
 
     // Enable if --enable flag set
     if cli.enable {
-        engine.lock().unwrap().set_enabled(true);
+        with_engine_events(&engine, |eng| eng.set_enabled(true));
     }
 
     // Start IPC server
@@ -207,7 +207,7 @@ fn main() {
                 if dry_run_override {
                     new_config.options.dry_run = true;
                 }
-                engine_clone.lock().unwrap().apply_config(new_config);
+                with_engine_events(&engine_clone, |eng| eng.apply_config(new_config));
                 logger_clone.info("Config reloaded successfully");
             }
             Err(e) => {

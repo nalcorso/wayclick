@@ -1,5 +1,5 @@
 use crate::config::{TriggerBinding, TriggerMode};
-use crate::engine::Engine;
+use crate::engine::{with_engine_events, Engine};
 use crate::event_bus::{EventBus, EventType};
 use crate::logger::Logger;
 use serde::Deserialize;
@@ -125,20 +125,17 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
         }
 
         "toggle" => {
-            let mut engine = engine.lock().unwrap();
-            let new_state = engine.toggle_enabled();
+            let new_state = with_engine_events(engine, |eng| eng.toggle_enabled());
             make_response(id, json!({ "enabled": new_state }))
         }
 
         "enable" => {
-            let mut engine = engine.lock().unwrap();
-            engine.set_enabled(true);
+            with_engine_events(engine, |eng| eng.set_enabled(true));
             make_response(id, json!({ "enabled": true }))
         }
 
         "disable" => {
-            let mut engine = engine.lock().unwrap();
-            engine.set_enabled(false);
+            with_engine_events(engine, |eng| eng.set_enabled(false));
             make_response(id, json!({ "enabled": false }))
         }
 
@@ -156,8 +153,8 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
                 return make_error(id, -32602, "Missing 'id' parameter");
             }
 
-            let mut engine = engine.lock().unwrap();
-            match engine.trigger_event(trigger_id, press) {
+            let trigger_id = trigger_id.to_string();
+            match with_engine_events(engine, |eng| eng.trigger_event(&trigger_id, press)) {
                 Ok(()) => make_response(id, json!({ "triggered": trigger_id })),
                 Err(e) => make_error(id, -32000, &e.to_string()),
             }
@@ -204,8 +201,8 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
                 return make_error(id, -32602, "Missing 'layer' parameter");
             }
 
-            let mut engine = engine.lock().unwrap();
-            engine.set_layer(layer.to_string());
+            let layer = layer.to_string();
+            with_engine_events(engine, |eng| eng.set_layer(layer.clone()));
             make_response(id, json!({ "layer": layer }))
         }
 

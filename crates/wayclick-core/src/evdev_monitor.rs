@@ -1,7 +1,7 @@
 // EvdevMonitor — coordinates device monitoring threads, hotplug, and trigger dispatch.
 
 use crate::config::{Binding, DeviceBinding, TriggerEdge};
-use crate::engine::Engine;
+use crate::engine::{with_engine_events, Engine};
 use crate::evdev_source::{
     self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, SYN_DROPPED,
     SYN_REPORT,
@@ -315,24 +315,27 @@ impl DeviceProcessor {
                                         "Button {} pressed, firing trigger '{}'",
                                         code_name, bb.trigger_id
                                     ));
-                                    let mut eng = self.engine.lock().unwrap();
-                                    let _ = eng.trigger_event(&bb.trigger_id, true);
+                                    with_engine_events(&self.engine, |eng| {
+                                        let _ = eng.trigger_event(&bb.trigger_id, true);
+                                    });
                                 }
                                 0 if bb.on == TriggerEdge::Press => {
                                     self.logger.debug(format!(
                                         "Button {} released, deactivating trigger '{}'",
                                         code_name, bb.trigger_id
                                     ));
-                                    let mut eng = self.engine.lock().unwrap();
-                                    let _ = eng.trigger_event(&bb.trigger_id, false);
+                                    with_engine_events(&self.engine, |eng| {
+                                        let _ = eng.trigger_event(&bb.trigger_id, false);
+                                    });
                                 }
                                 0 if bb.on == TriggerEdge::Release => {
                                     self.logger.debug(format!(
                                         "Button {} released, firing trigger '{}'",
                                         code_name, bb.trigger_id
                                     ));
-                                    let mut eng = self.engine.lock().unwrap();
-                                    let _ = eng.trigger_event(&bb.trigger_id, true);
+                                    with_engine_events(&self.engine, |eng| {
+                                        let _ = eng.trigger_event(&bb.trigger_id, true);
+                                    });
                                 }
                                 _ => {}
                             }
@@ -393,9 +396,11 @@ impl DeviceProcessor {
                                     "Button {} pressed, claiming trigger '{}'",
                                     code_name, bb.trigger_id
                                 ));
-                                let mut eng = self.engine.lock().unwrap();
-                                if eng.trigger_event(&bb.trigger_id, true).is_ok() {
-                                    drop(eng);
+                                let triggered =
+                                    with_engine_events(&self.engine, |eng| {
+                                        eng.trigger_event(&bb.trigger_id, true).is_ok()
+                                    });
+                                if triggered {
                                     self.active_claims.insert(binding_idx, bb.swallow);
                                     if bb.swallow {
                                         for &c in &bb.codes {
@@ -440,9 +445,10 @@ impl DeviceProcessor {
                                     "Button {} released, firing on=release trigger '{}'",
                                     code_name, bb.trigger_id
                                 ));
-                                let mut eng = self.engine.lock().unwrap();
                                 // swallow=true is forbidden for on=Release (validated at load time)
-                                let _ = eng.trigger_event(&bb.trigger_id, true);
+                                with_engine_events(&self.engine, |eng| {
+                                    let _ = eng.trigger_event(&bb.trigger_id, true);
+                                });
                             }
                         }
 
@@ -469,8 +475,9 @@ impl DeviceProcessor {
                                     "Button {} released, deactivating trigger '{}'",
                                     code_name, bb.trigger_id
                                 ));
-                                let mut eng = self.engine.lock().unwrap();
-                                let _ = eng.trigger_event(&bb.trigger_id, false);
+                                with_engine_events(&self.engine, |eng| {
+                                    let _ = eng.trigger_event(&bb.trigger_id, false);
+                                });
                                 if swallow {
                                     for &c in &bb.codes {
                                         released_swallowed_codes.insert(c);
@@ -502,11 +509,11 @@ impl DeviceProcessor {
                                 "Scroll {:?} (magnitude {}), firing trigger '{}'",
                                 direction, magnitude, sb.trigger_id
                             ));
-                            let mut eng = self.engine.lock().unwrap();
-                            for _ in 0..magnitude {
-                                let _ = eng.trigger_event(&sb.trigger_id, true);
-                            }
-                            drop(eng);
+                            with_engine_events(&self.engine, |eng| {
+                                for _ in 0..magnitude {
+                                    let _ = eng.trigger_event(&sb.trigger_id, true);
+                                }
+                            });
                             if sb.swallow {
                                 suppress_scroll_indices.insert(event_idx);
                                 // Also suppress the corresponding hi-res event in this frame

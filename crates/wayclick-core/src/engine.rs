@@ -6,7 +6,7 @@ use rand::Rng;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::mpsc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use thiserror::Error;
@@ -80,6 +80,9 @@ pub struct Engine {
     start_time: Instant,
     config_path: String,
     current_layer: String,
+    /// Events accumulated during a method call; drained and published by `with_engine_events`
+    /// *after* the engine `Mutex` is released, preventing lock-order inversions.
+    pending_events: Vec<Event>,
 }
 
 impl Engine {
@@ -105,6 +108,7 @@ impl Engine {
             start_time: Instant::now(),
             config_path,
             current_layer: "base".to_string(),
+            pending_events: Vec::new(),
         }
     }
 
@@ -126,7 +130,7 @@ impl Engine {
             self.state.entry(trigger.id.clone()).or_insert(TriggerState::Idle);
         }
         self.config = config;
-        self.event_bus.publish(&Event::config_reloaded());
+        self.pending_events.push(Event::config_reloaded());
         self.logger.info("Config applied, all workers stopped");
     }
 
@@ -140,8 +144,8 @@ impl Engine {
         let from = self.current_layer.clone();
         self.logger
             .info(format!("Layer changed: '{}' -> '{}'", from, layer));
-        self.event_bus
-            .publish(&Event::layer_changed(from, layer.clone()));
+        self.pending_events
+            .push(Event::layer_changed(from, layer.clone()));
         self.current_layer = layer;
     }
 
@@ -154,7 +158,7 @@ impl Engine {
             "Engine {}",
             if enabled { "enabled" } else { "disabled" }
         ));
-        self.event_bus.publish(&Event::enabled_changed(enabled));
+        self.pending_events.push(Event::enabled_changed(enabled));
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -208,8 +212,8 @@ impl Engine {
             TriggerState::Active { .. } => {
                 self.stop_worker(&trigger.id);
                 self.logger.info(format!("{}: stopped", trigger.id));
-                self.event_bus
-                    .publish(&Event::trigger_deactivated(trigger.id.clone()));
+                self.pending_events
+                    .push(Event::trigger_deactivated(trigger.id.clone()));
                 if let Some(cd) = trigger.cooldown_ms {
                     self.state.insert(
                         trigger.id.clone(),
@@ -225,14 +229,14 @@ impl Engine {
                     return Err(EngineError::Cooldown);
                 }
                 self.start_worker(trigger)?;
-                self.event_bus
-                    .publish(&Event::trigger_activated(trigger.id.clone()));
+                self.pending_events
+                    .push(Event::trigger_activated(trigger.id.clone()));
                 Ok(())
             }
             TriggerState::Idle => {
                 self.start_worker(trigger)?;
-                self.event_bus
-                    .publish(&Event::trigger_activated(trigger.id.clone()));
+                self.pending_events
+                    .push(Event::trigger_activated(trigger.id.clone()));
                 Ok(())
             }
         }
@@ -245,16 +249,16 @@ impl Engine {
                 TriggerState::Active { .. } => Ok(()), // Already active
                 _ => {
                     self.start_worker(trigger)?;
-                    self.event_bus
-                        .publish(&Event::trigger_activated(trigger.id.clone()));
+                    self.pending_events
+                        .push(Event::trigger_activated(trigger.id.clone()));
                     Ok(())
                 }
             }
         } else {
             self.stop_worker(&trigger.id);
             self.logger.info(format!("{}: released", trigger.id));
-            self.event_bus
-                .publish(&Event::trigger_deactivated(trigger.id.clone()));
+            self.pending_events
+                .push(Event::trigger_deactivated(trigger.id.clone()));
             Ok(())
         }
     }
@@ -263,24 +267,24 @@ impl Engine {
         self.logger
             .info(format!("{}: oneshot executing", trigger.id));
 
-        self.event_bus
-            .publish(&Event::trigger_activated(trigger.id.clone()));
+        self.pending_events
+            .push(Event::trigger_activated(trigger.id.clone()));
 
         // Handle SetLayer directly (needs mutable self access)
         if let ActionConfig::SetLayer { ref layer } = trigger.action {
             self.set_layer(layer.clone());
             self.logger
                 .info(format!("{}: oneshot complete", trigger.id));
-            self.event_bus
-                .publish(&Event::trigger_deactivated(trigger.id.clone()));
+            self.pending_events
+                .push(Event::trigger_deactivated(trigger.id.clone()));
             return Ok(());
         }
 
         execute_action_sync(&trigger.action, &self.backend, &self.logger)?;
         self.logger
             .info(format!("{}: oneshot complete", trigger.id));
-        self.event_bus
-            .publish(&Event::trigger_deactivated(trigger.id.clone()));
+        self.pending_events
+            .push(Event::trigger_deactivated(trigger.id.clone()));
         Ok(())
     }
 
@@ -464,12 +468,36 @@ impl Engine {
             })
             .collect()
     }
+    /// Drains accumulated pending events, returning them for publishing after the engine lock is
+    /// released. Use `with_engine_events` rather than calling this directly.
+    pub fn drain_pending_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.pending_events)
+    }
 }
 
 impl Drop for Engine {
     fn drop(&mut self) {
         self.stop_all_workers();
     }
+}
+
+/// Acquire the engine lock, run `f`, then publish any events accumulated during the call.
+///
+/// Events are collected inside the lock and published *after* the lock is released, which
+/// prevents lock-order inversions: no subscriber callback can deadlock by re-acquiring the
+/// engine lock while this function is on the call stack.
+pub fn with_engine_events<T>(engine: &Arc<Mutex<Engine>>, f: impl FnOnce(&mut Engine) -> T) -> T {
+    let (result, events, bus) = {
+        let mut guard = engine.lock().unwrap();
+        let result = f(&mut guard);
+        let events = guard.drain_pending_events();
+        let bus = guard.event_bus.clone();
+        (result, events, bus)
+    };
+    for event in events {
+        bus.publish(&event);
+    }
+    result
 }
 
 /// Execute an action in a loop (for Toggle/Hold worker threads).
