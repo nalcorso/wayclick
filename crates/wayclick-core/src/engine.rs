@@ -356,6 +356,7 @@ fn execute_action_loop(
         }
         ActionConfig::KeyPress {
             key_code,
+            modifier_codes,
             interval_ms,
             duration_ms,
             jitter_ms,
@@ -366,8 +367,7 @@ fn execute_action_loop(
                 if stop_rx.try_recv().is_ok() {
                     break;
                 }
-                backend.key_press(*key_code)?;
-                backend.key_release(*key_code)?;
+                do_keystroke(backend, *key_code, modifier_codes, 0)?;
                 let sleep_ms = jittered_interval(*interval_ms, *jitter_ms);
                 if !interruptible_sleep(sleep_ms, stop_rx) {
                     break;
@@ -378,6 +378,14 @@ fn execute_action_loop(
                     }
                 }
             }
+        }
+        ActionConfig::Keystroke {
+            key_code,
+            modifier_codes,
+            hold_ms,
+            ..
+        } => {
+            do_keystroke(backend, *key_code, modifier_codes, *hold_ms)?;
         }
         ActionConfig::ScrollWheel {
             direction,
@@ -560,6 +568,7 @@ fn execute_action_sync(
         }
         ActionConfig::KeyPress {
             key_code,
+            modifier_codes,
             interval_ms,
             duration_ms,
             jitter_ms,
@@ -567,13 +576,11 @@ fn execute_action_sync(
         } => {
             let dur = duration_ms.unwrap_or(0);
             if dur == 0 {
-                backend.key_press(*key_code)?;
-                backend.key_release(*key_code)?;
+                do_keystroke(backend, *key_code, modifier_codes, 0)?;
             } else {
                 let action_start = Instant::now();
                 loop {
-                    backend.key_press(*key_code)?;
-                    backend.key_release(*key_code)?;
+                    do_keystroke(backend, *key_code, modifier_codes, 0)?;
                     if action_start.elapsed().as_millis() >= dur as u128 {
                         break;
                     }
@@ -581,6 +588,14 @@ fn execute_action_sync(
                     thread::sleep(Duration::from_millis(sleep_ms as u64));
                 }
             }
+        }
+        ActionConfig::Keystroke {
+            key_code,
+            modifier_codes,
+            hold_ms,
+            ..
+        } => {
+            do_keystroke(backend, *key_code, modifier_codes, *hold_ms)?;
         }
         ActionConfig::ScrollWheel {
             direction, amount, ..
@@ -686,6 +701,50 @@ fn do_click(
         thread::sleep(Duration::from_millis(hold_ms as u64));
         backend.mouse_release(button)
     }
+}
+
+/// Press modifier keys, press the main key, optionally hold, then release everything
+/// in reverse order. On backend error after any modifier has been pressed, best-effort
+/// releases the already-pressed modifiers before returning the error.
+fn do_keystroke(
+    backend: &Arc<dyn InputBackend>,
+    key_code: u32,
+    modifier_codes: &[u32],
+    hold_ms: u32,
+) -> Result<(), BackendError> {
+    let mut pressed = 0usize;
+
+    // Press modifiers
+    for &mod_code in modifier_codes {
+        if let Err(e) = backend.key_press(mod_code) {
+            // Best-effort release already-pressed modifiers
+            for &undo in modifier_codes[..pressed].iter().rev() {
+                let _ = backend.key_release(undo);
+            }
+            return Err(e);
+        }
+        pressed += 1;
+    }
+
+    // Press the main key
+    if let Err(e) = backend.key_press(key_code) {
+        for &undo in modifier_codes[..pressed].iter().rev() {
+            let _ = backend.key_release(undo);
+        }
+        return Err(e);
+    }
+
+    if hold_ms > 0 {
+        thread::sleep(Duration::from_millis(hold_ms as u64));
+    }
+
+    // Release main key then modifiers in reverse order
+    backend.key_release(key_code)?;
+    for &mod_code in modifier_codes.iter().rev() {
+        backend.key_release(mod_code)?;
+    }
+
+    Ok(())
 }
 
 fn jittered_interval(interval_ms: u32, jitter_ms: u32) -> u32 {
@@ -1083,5 +1142,124 @@ mod tests {
         let new_config = Config::default();
         engine.apply_config(new_config);
         assert_eq!(engine.current_layer(), "combat");
+    }
+
+    fn keystroke_trigger(
+        id: &str,
+        key_code: u32,
+        modifier_codes: Vec<u32>,
+        hold_ms: u32,
+        mode: TriggerMode,
+    ) -> TriggerBinding {
+        TriggerBinding {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            mode,
+            action: ActionConfig::Keystroke {
+                key_name: format!("KEY_{}", key_code),
+                key_code,
+                modifier_names: modifier_codes
+                    .iter()
+                    .map(|c| format!("KEY_{}", c))
+                    .collect(),
+                modifier_codes,
+                hold_ms,
+            },
+            cooldown_ms: None,
+        }
+    }
+
+    #[test]
+    fn test_keystroke_oneshot_exact_sequence() {
+        // Ctrl+Z: modifiers=[29 (LEFTCTRL)], key=44 (Z)
+        let trigger = keystroke_trigger("ks", 44, vec![29], 0, TriggerMode::OneShot);
+        let (mut engine, calls) = test_engine(vec![trigger]);
+        engine.set_enabled(true);
+        engine.trigger_event("ks", true).unwrap();
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(
+            recorded,
+            vec![
+                BackendCall::KeyPress(29),
+                BackendCall::KeyPress(44),
+                BackendCall::KeyRelease(44),
+                BackendCall::KeyRelease(29),
+            ],
+            "Ctrl+Z should press modifier then key, release key then modifier"
+        );
+    }
+
+    #[test]
+    fn test_keystroke_no_modifiers_exact_sequence() {
+        // Space: key=57, no modifiers
+        let trigger = keystroke_trigger("ks", 57, vec![], 0, TriggerMode::OneShot);
+        let (mut engine, calls) = test_engine(vec![trigger]);
+        engine.set_enabled(true);
+        engine.trigger_event("ks", true).unwrap();
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(
+            recorded,
+            vec![BackendCall::KeyPress(57), BackendCall::KeyRelease(57),],
+            "Space alone should produce KeyPress then KeyRelease"
+        );
+    }
+
+    #[test]
+    fn test_key_press_with_modifiers_oneshot() {
+        // key_press in oneshot mode with ctrl modifier
+        let trigger = TriggerBinding {
+            id: "kp".into(),
+            name: "kp".into(),
+            description: String::new(),
+            mode: TriggerMode::OneShot,
+            action: ActionConfig::KeyPress {
+                key_name: "KEY_Z".into(),
+                key_code: 44,
+                modifier_names: vec!["KEY_LEFTCTRL".into()],
+                modifier_codes: vec![29],
+                interval_ms: 100,
+                duration_ms: Some(0),
+                jitter_ms: 0,
+            },
+            cooldown_ms: None,
+        };
+        let (mut engine, calls) = test_engine(vec![trigger]);
+        engine.set_enabled(true);
+        engine.trigger_event("kp", true).unwrap();
+
+        let recorded = calls.lock().unwrap().clone();
+        assert_eq!(
+            &recorded[..4],
+            &[
+                BackendCall::KeyPress(29),
+                BackendCall::KeyPress(44),
+                BackendCall::KeyRelease(44),
+                BackendCall::KeyRelease(29),
+            ],
+            "Key press with modifier should wrap key in modifier press/release"
+        );
+    }
+
+    #[test]
+    fn test_keystroke_hold_ms_completes_without_error() {
+        let trigger = keystroke_trigger("ks", 44, vec![29], 10, TriggerMode::OneShot);
+        let (mut engine, calls) = test_engine(vec![trigger]);
+        engine.set_enabled(true);
+        engine.trigger_event("ks", true).unwrap();
+
+        let recorded = calls.lock().unwrap().clone();
+        // Regardless of hold_ms, the press/release sequence must be complete
+        assert_eq!(
+            recorded,
+            vec![
+                BackendCall::KeyPress(29),
+                BackendCall::KeyPress(44),
+                BackendCall::KeyRelease(44),
+                BackendCall::KeyRelease(29),
+            ]
+        );
     }
 }

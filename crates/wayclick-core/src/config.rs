@@ -142,9 +142,22 @@ pub enum ActionConfig {
     KeyPress {
         key_name: String,
         key_code: u32,
+        #[serde(default)]
+        modifier_names: Vec<String>,
+        #[serde(default)]
+        modifier_codes: Vec<u32>,
         interval_ms: u32,
         duration_ms: Option<u32>,
         jitter_ms: u32,
+    },
+    /// Single chord keystroke (oneshot-only).
+    /// Presses modifiers, then the key, then releases in reverse order.
+    Keystroke {
+        key_name: String,
+        key_code: u32,
+        modifier_names: Vec<String>,
+        modifier_codes: Vec<u32>,
+        hold_ms: u32,
     },
     ScrollWheel {
         direction: ScrollDirection,
@@ -197,6 +210,7 @@ impl ActionConfig {
         match self {
             ActionConfig::AutoClick { .. } => "auto_click",
             ActionConfig::KeyPress { .. } => "key_press",
+            ActionConfig::Keystroke { .. } => "keystroke",
             ActionConfig::ScrollWheel { .. } => "scroll",
             ActionConfig::MouseMove { .. } => "mouse_move",
             ActionConfig::MouseMoveAbsolute { .. } => "mouse_move_abs",
@@ -218,6 +232,7 @@ impl ActionConfig {
         matches!(
             self,
             ActionConfig::SetLayer { .. }
+                | ActionConfig::Keystroke { .. }
                 | ActionConfig::ClickAt { .. }
                 | ActionConfig::Drag { .. }
                 | ActionConfig::MouseMoveAbsolute { .. }
@@ -424,6 +439,26 @@ pub fn key_name_to_code(name: &str) -> Option<u32> {
         // Screen brightness
         "KEY_BRIGHTNESSDOWN" => 224,
         "KEY_BRIGHTNESSUP" => 225,
+        // Super / Meta / Win
+        "KEY_LEFTMETA" => 125,
+        "KEY_RIGHTMETA" => 126,
+        // Lock / special keys
+        "KEY_NUMLOCK" => 69,
+        "KEY_SCROLLLOCK" => 70,
+        "KEY_PAUSE" => 119,
+        "KEY_SYSRQ" => 99,
+        "KEY_COMPOSE" => 127,
+        // Short-name modifier aliases (e.g. "ctrl" → KEY_CTRL → KEY_LEFTCTRL)
+        "KEY_CTRL" => 29,
+        "KEY_CONTROL" => 29,
+        "KEY_SHIFT" => 42,
+        "KEY_ALT" => 56,
+        "KEY_META" => 125,
+        "KEY_SUPER" => 125,
+        "KEY_WIN" => 125,
+        "KEY_ALTGR" => 100,
+        "KEY_RCTRL" => 97,
+        "KEY_RSHIFT" => 54,
         _ => return None,
     })
 }
@@ -533,6 +568,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
             | ActionConfig::MouseMoveAbsolute { .. }
             | ActionConfig::ClickAt { .. }
             | ActionConfig::Drag { .. }
+            | ActionConfig::Keystroke { .. }
             | ActionConfig::SetLayer { .. } => {}
         }
     }
@@ -569,6 +605,18 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
     for trigger in &config.triggers {
         validate_action_intervals(&trigger.action, config.options.min_interval_ms, &mut errors);
         validate_action_depth(&trigger.action, 0, &mut errors);
+
+        // Oneshot-only actions (Keystroke, ClickAt, Drag, MouseMoveAbsolute, SetLayer) must not
+        // be the root action of a Toggle or Hold trigger.
+        if trigger.action.is_oneshot_only()
+            && !matches!(trigger.mode, TriggerMode::OneShot)
+        {
+            errors.push(ConfigError::Validation(format!(
+                "trigger '{}': action type '{}' can only be used with mode 'oneshot'",
+                trigger.id,
+                trigger.action.type_name()
+            )));
+        }
     }
 
     if errors.is_empty() {

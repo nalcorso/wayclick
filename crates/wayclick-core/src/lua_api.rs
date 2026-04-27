@@ -313,6 +313,8 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             let interval_ms: u32 = table.get("interval_ms").unwrap_or(1000);
             let duration_ms: Option<u32> = table.get("duration_ms").ok();
             let jitter_ms: u32 = table.get("jitter_ms").unwrap_or(0);
+            let (modifier_names, modifier_codes) =
+                parse_modifiers(&table).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
 
             let action = lua.create_table()?;
             action.set("_type", "key_press")?;
@@ -323,11 +325,57 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
                 action.set("_duration_ms", d)?;
             }
             action.set("_jitter_ms", jitter_ms)?;
+            let names_tbl = lua.create_table()?;
+            for (i, n) in modifier_names.iter().enumerate() {
+                names_tbl.set(i + 1, n.as_str())?;
+            }
+            let codes_tbl = lua.create_table()?;
+            for (i, c) in modifier_codes.iter().enumerate() {
+                codes_tbl.set(i + 1, *c)?;
+            }
+            action.set("_modifier_names", names_tbl)?;
+            action.set("_modifier_codes", codes_tbl)?;
             Ok(action)
         })
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
     wayclick
         .set("key_press", key_press)
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+
+    // wayclick.keystroke(table) -> action table
+    // Sends a single key chord (oneshot-only). Modifiers are pressed first,
+    // then the main key, then all released in reverse order.
+    let keystroke = lua
+        .create_function(|lua, table: LuaTable| {
+            let key: String = table
+                .get::<String>("key")
+                .map_err(|_| LuaError::RuntimeError("keystroke requires 'key' field".into()))?;
+            let (key_name, key_code) =
+                normalize_key_name(&key).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+            let hold_ms: u32 = table.get("hold_ms").unwrap_or(0);
+            let (modifier_names, modifier_codes) =
+                parse_modifiers(&table).map_err(|e| LuaError::RuntimeError(e.to_string()))?;
+
+            let action = lua.create_table()?;
+            action.set("_type", "keystroke")?;
+            action.set("_key_name", key_name)?;
+            action.set("_key_code", key_code)?;
+            action.set("_hold_ms", hold_ms)?;
+            let names_tbl = lua.create_table()?;
+            for (i, n) in modifier_names.iter().enumerate() {
+                names_tbl.set(i + 1, n.as_str())?;
+            }
+            let codes_tbl = lua.create_table()?;
+            for (i, c) in modifier_codes.iter().enumerate() {
+                codes_tbl.set(i + 1, *c)?;
+            }
+            action.set("_modifier_names", names_tbl)?;
+            action.set("_modifier_codes", codes_tbl)?;
+            Ok(action)
+        })
+        .map_err(|e| ConfigError::Lua(e.to_string()))?;
+    wayclick
+        .set("keystroke", keystroke)
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
 
     // wayclick.scroll(table) -> action table
@@ -874,12 +922,42 @@ fn parse_action_table(table: &LuaTable, depth: usize) -> Result<ActionConfig, Lu
             let interval_ms: u32 = table.get("_interval_ms")?;
             let duration_ms: Option<u32> = table.get("_duration_ms").ok();
             let jitter_ms: u32 = table.get("_jitter_ms")?;
+            let modifier_names: Vec<String> = match table.get::<LuaTable>("_modifier_names") {
+                Ok(t) => t.sequence_values::<String>().collect::<Result<Vec<_>, _>>()?,
+                Err(_) => Vec::new(),
+            };
+            let modifier_codes: Vec<u32> = match table.get::<LuaTable>("_modifier_codes") {
+                Ok(t) => t.sequence_values::<u32>().collect::<Result<Vec<_>, _>>()?,
+                Err(_) => Vec::new(),
+            };
             Ok(ActionConfig::KeyPress {
                 key_name,
                 key_code,
+                modifier_names,
+                modifier_codes,
                 interval_ms,
                 duration_ms,
                 jitter_ms,
+            })
+        }
+        "keystroke" => {
+            let key_name: String = table.get("_key_name")?;
+            let key_code: u32 = table.get("_key_code")?;
+            let hold_ms: u32 = table.get("_hold_ms").unwrap_or(0);
+            let modifier_names: Vec<String> = match table.get::<LuaTable>("_modifier_names") {
+                Ok(t) => t.sequence_values::<String>().collect::<Result<Vec<_>, _>>()?,
+                Err(_) => Vec::new(),
+            };
+            let modifier_codes: Vec<u32> = match table.get::<LuaTable>("_modifier_codes") {
+                Ok(t) => t.sequence_values::<u32>().collect::<Result<Vec<_>, _>>()?,
+                Err(_) => Vec::new(),
+            };
+            Ok(ActionConfig::Keystroke {
+                key_name,
+                key_code,
+                modifier_names,
+                modifier_codes,
+                hold_ms,
             })
         }
         "scroll" => {
@@ -1009,6 +1087,36 @@ fn parse_action_list(table: &LuaTable, depth: usize) -> Result<Vec<ActionConfig>
         actions.push(parse_action_table(&t, depth)?);
     }
     Ok(actions)
+}
+
+/// Parse the optional `modifiers` array from a Lua action table.
+/// Accepts short names ("ctrl", "shift", "alt", "super") and full KEY_* names.
+/// Returns parallel vecs of resolved names and codes.
+/// Errors on unknown modifier names or duplicates.
+fn parse_modifiers(table: &LuaTable) -> Result<(Vec<String>, Vec<u32>), ConfigError> {
+    let mod_table: LuaTable = match table.get("modifiers") {
+        Ok(t) => t,
+        Err(_) => return Ok((Vec::new(), Vec::new())),
+    };
+
+    let mut names = Vec::new();
+    let mut codes = Vec::new();
+    let mut seen_codes = std::collections::HashSet::new();
+
+    for item in mod_table.sequence_values::<String>() {
+        let raw = item.map_err(|e| ConfigError::Lua(e.to_string()))?;
+        let (resolved_name, code) = normalize_key_name(&raw)?;
+        if !seen_codes.insert(code) {
+            return Err(ConfigError::Validation(format!(
+                "duplicate modifier key: '{}'",
+                raw
+            )));
+        }
+        names.push(resolved_name);
+        codes.push(code);
+    }
+
+    Ok((names, codes))
 }
 
 #[cfg(test)]
@@ -2492,5 +2600,270 @@ mod tests {
         );
         let result = load_config(&path, &test_logger());
         assert!(result.is_err(), "Should error for invalid scroll direction");
+    }
+
+    #[test]
+    fn test_keystroke_basic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.keystroke({ key = "z", modifiers = {"ctrl"} }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::Keystroke {
+                key_name,
+                key_code,
+                modifier_names,
+                modifier_codes,
+                hold_ms,
+            } => {
+                assert_eq!(key_name, "KEY_Z");
+                assert_eq!(*key_code, 44);
+                assert_eq!(modifier_names, &["KEY_CTRL"]);
+                assert_eq!(modifier_codes, &[29]);
+                assert_eq!(*hold_ms, 0);
+            }
+            other => panic!("Expected Keystroke, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_keystroke_no_modifiers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.keystroke({ key = "space" }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::Keystroke {
+                key_name,
+                key_code,
+                modifier_names,
+                modifier_codes,
+                ..
+            } => {
+                assert_eq!(key_name, "KEY_SPACE");
+                assert_eq!(*key_code, 57);
+                assert!(modifier_names.is_empty());
+                assert!(modifier_codes.is_empty());
+            }
+            other => panic!("Expected Keystroke, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_keystroke_multiple_modifiers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.keystroke({ key = "z", modifiers = {"ctrl", "shift"} }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::Keystroke {
+                modifier_names,
+                modifier_codes,
+                ..
+            } => {
+                assert_eq!(modifier_names, &["KEY_CTRL", "KEY_SHIFT"]);
+                assert_eq!(modifier_codes, &[29, 42]);
+            }
+            other => panic!("Expected Keystroke, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_keystroke_hold_ms() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.keystroke({ key = "enter", hold_ms = 50 }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::Keystroke { hold_ms, .. } => {
+                assert_eq!(*hold_ms, 50);
+            }
+            other => panic!("Expected Keystroke, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_keystroke_invalid_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.keystroke({ key = "DEFINITELY_NOT_A_KEY" }),
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err(), "Should error for unknown key");
+    }
+
+    #[test]
+    fn test_keystroke_invalid_modifier() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.keystroke({ key = "z", modifiers = {"not_a_modifier"} }),
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err(), "Should error for unknown modifier");
+    }
+
+    #[test]
+    fn test_key_press_with_modifiers() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                action = wayclick.key_press({ key = "z", modifiers = {"ctrl"}, interval_ms = 200 }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::KeyPress {
+                key_name,
+                key_code,
+                modifier_names,
+                modifier_codes,
+                interval_ms,
+                ..
+            } => {
+                assert_eq!(key_name, "KEY_Z");
+                assert_eq!(*key_code, 44);
+                assert_eq!(modifier_names, &["KEY_CTRL"]);
+                assert_eq!(modifier_codes, &[29]);
+                assert_eq!(*interval_ms, 200);
+            }
+            other => panic!("Expected KeyPress, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_modifier_alias_ctrl() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.keystroke({ key = "z", modifiers = {"ctrl"} }),
+            })
+            "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::Keystroke { modifier_codes, .. } => {
+                // "ctrl" should resolve to KEY_LEFTCTRL = 29
+                assert_eq!(modifier_codes, &[29]);
+            }
+            other => panic!("Expected Keystroke, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_modifier_alias_super() {
+        let dir = tempfile::tempdir().unwrap();
+        // All three aliases should resolve to KEY_LEFTMETA = 125
+        for alias in &["super", "win", "meta"] {
+            let path = write_temp_config(
+                dir.path(),
+                "init.lua",
+                &format!(
+                    r#"
+                    wayclick.register_trigger({{
+                        id = "test",
+                        mode = "oneshot",
+                        action = wayclick.keystroke({{ key = "z", modifiers = {{"{}"}} }}),
+                    }})
+                    "#,
+                    alias
+                ),
+            );
+            let config = load_config(&path, &test_logger()).unwrap();
+            match &config.triggers[0].action {
+                ActionConfig::Keystroke { modifier_codes, .. } => {
+                    assert_eq!(
+                        *modifier_codes,
+                        vec![125],
+                        "alias '{}' should resolve to KEY_LEFTMETA (125)",
+                        alias
+                    );
+                }
+                other => panic!("Expected Keystroke for alias '{}', got {:?}", alias, other),
+            }
+        }
+    }
+
+    #[test]
+    fn test_keystroke_rejected_in_toggle_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "toggle",
+                action = wayclick.keystroke({ key = "z" }),
+            })
+            "#,
+        );
+        let result = load_config(&path, &test_logger());
+        assert!(result.is_err(), "Keystroke should be rejected in toggle mode");
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("keystroke") || err.contains("oneshot"),
+            "Error should mention keystroke or oneshot: {}",
+            err
+        );
     }
 }

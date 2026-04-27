@@ -52,13 +52,33 @@ wayclick.register_trigger({
 
 ### key_press
 
-Presses and releases a single keyboard key.
+Presses and releases a keyboard key repeatedly on a fixed interval.
 
 ```lua
 wayclick.register_trigger({
     id = "press_a",
-    mode = "oneshot",
-    action = wayclick.key_press({ key = "KEY_A" }),
+    mode = "toggle",
+    action = wayclick.key_press({
+        key = "a",            -- required: key name (e.g. "a", "F5", "KEY_Z")
+        interval_ms = 1000,   -- optional: ms between presses (default: 1000)
+        duration_ms = nil,    -- optional: stop after this many ms (default: runs until stopped)
+        jitter_ms = 0,        -- optional: random ±jitter added to interval (default: 0)
+        modifiers = {},       -- optional: list of modifier keys held during each press
+    }),
+})
+```
+
+To hold modifier keys during each auto-repeated key press:
+
+```lua
+wayclick.register_trigger({
+    id = "repeat_ctrl_z",
+    mode = "toggle",
+    action = wayclick.key_press({
+        key = "z",
+        modifiers = {"ctrl"},
+        interval_ms = 500,
+    }),
 })
 ```
 
@@ -78,6 +98,56 @@ wayclick.register_trigger({
         },
     }),
 })
+```
+
+### keystroke
+
+Sends a single key chord (one press-and-release, optionally with modifiers).
+This action is **oneshot-only** and cannot be used with `toggle` or `hold` modes.
+
+```lua
+wayclick.register_trigger({
+    id = "undo",
+    mode = "oneshot",
+    action = wayclick.keystroke({
+        key = "z",              -- required: key name (e.g. "z", "F4", "KEY_ENTER")
+        modifiers = {"ctrl"},   -- optional: list of modifier keys to hold (default: none)
+        hold_ms = 0,            -- optional: ms to hold keys before releasing (default: 0)
+    }),
+})
+```
+
+Modifier keys are pressed before the main key and released in reverse order after.
+
+**Common modifier aliases:**
+
+| Alias                    | Key              |
+|--------------------------|------------------|
+| `"ctrl"`, `"control"`    | Left Ctrl        |
+| `"shift"`                | Left Shift       |
+| `"alt"`                  | Left Alt         |
+| `"super"`, `"win"`, `"meta"` | Left Super   |
+| `"altgr"`, `"ralt"`      | Right Alt        |
+| `"rctrl"`                | Right Ctrl       |
+| `"rshift"`               | Right Shift      |
+
+Full `KEY_*` names (e.g. `"KEY_LEFTCTRL"`) are also accepted.
+
+Examples:
+
+```lua
+-- Ctrl+Z (undo)
+wayclick.keystroke({ key = "z", modifiers = {"ctrl"} })
+
+-- Ctrl+Shift+Z (redo)
+wayclick.keystroke({ key = "z", modifiers = {"ctrl", "shift"} })
+
+-- Alt+F4 (close window)
+wayclick.keystroke({ key = "F4", modifiers = {"alt"} })
+
+-- Super key alone
+wayclick.keystroke({ key = "KEY_LEFTMETA" })
+```
 ```
 
 ### scroll
