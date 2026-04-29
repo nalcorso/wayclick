@@ -1,19 +1,38 @@
 # Waybar Module for Wayclick
 
-A status module for [Waybar](https://github.com/Alexays/Waybar) that displays
-the current state of the wayclick daemon — enabled/disabled, active layer,
-running triggers, and more.
+A real-time status module for [Waybar](https://github.com/Alexays/Waybar) that
+displays the current state of the wayclick daemon — enabled/disabled, active
+layer, running triggers, per-trigger activity, and more.
 
 ## Preview
 
 ```
-┌─────────────────────────────────────────────┐
-│  󰟸 Base           — enabled, base layer     │
-│  󰟸 Gaming ⚡2     — gaming layer, 2 active  │
-│  󰟸 Off            — disabled                │
-│  󰟸 ✗              — daemon not running      │
-└─────────────────────────────────────────────┘
+ 󰟸 Gaming·                      ← normal format, active layer marked
+ 󰟸 Gaming ⚡2                   ← verbose format (2 active triggers)
+ 󰟸 ●●○○                         ← triggers format (activity dots)
+ 󰟸                               ← minimal format
 ```
+
+Tooltip (hover to see):
+
+```
+wayclick ── enabled ── Gaming
+─────────────────────────────────────
+ Triggers  8 total · 2 active
+
+  ● rapid_fire          toggle   auto_click          47×
+  ● auto_mode           toggle   key_press           12×
+  ○ hideout_macro       oneshot  sequence             3×
+  ✗ utility_1           toggle   keystroke            0×
+
+─────────────────────────────────────
+ Layers  base  gaming·  media  work
+
+─────────────────────────────────────
+ uinput  ·  uptime 2h 15m
+```
+
+(`·` marks the current layer, `●` active trigger, `○` idle, `✗` user-disabled)
 
 ## Setup
 
@@ -23,33 +42,37 @@ Edit `~/.config/waybar/config.jsonc`:
 
 ```jsonc
 {
-    "modules-right": ["custom/wayclick", "clock", ...],
+    "modules-right": ["custom/wayclick", "clock"],
 
     "custom/wayclick": {
-        "exec": "wayclickctl waybar",
+        "exec": "wayclickctl waybar --continuous",
         "return-type": "json",
-        "interval": 2,
-        "on-click": "wayclickctl toggle",
-        "on-click-right": "wayclickctl layer set base",
+        "on-click":        "wayclickctl toggle",
+        "on-click-right":  "wayclickctl layer set base",
+        "on-click-middle": "wayclickctl reload",
+        "on-scroll-up":    "wayclickctl layer cycle",
+        "on-scroll-down":  "wayclickctl layer cycle --backward",
         "format": "{}",
-        "tooltip": true
+        "tooltip": true,
+        "escape": true
     }
 }
 ```
 
-See [`config.jsonc`](config.jsonc) for the full example with comments.
+See [`config.jsonc`](config.jsonc) for the full annotated example.
 
 ### 2. Add styles to your Waybar CSS
 
 Copy the styles from [`style.css`](style.css) into `~/.config/waybar/style.css`.
-Four themes are included — uncomment the one you prefer:
+Always include the **Base styles** block, then uncomment one theme:
 
 | Theme | Description |
 |-------|-------------|
 | **Default** | Clean text colors, suits most setups |
-| **Catppuccin** | Background + border, matches Catppuccin Mocha |
-| **Pill** | Rounded pill with background fills |
-| **Gaming** | Glow effects, animated when triggers are active |
+| **Catppuccin Mocha** | Background + border, matches Catppuccin Mocha |
+| **Pill** | Rounded pill with background fills and border pulse |
+| **Gaming** | Per-color glow cycle, intense trigger flash |
+| **Nord** | Cool blues and frost tones from the Nord palette |
 
 ### 3. Reload Waybar
 
@@ -59,46 +82,78 @@ killall -SIGUSR2 waybar
 
 ## Display Formats
 
-The `wayclickctl waybar` command supports three display formats:
-
 ```bash
 wayclickctl waybar --format minimal    # 󰟸
-wayclickctl waybar --format normal     # 󰟸 Base       (default)
-wayclickctl waybar --format verbose    # 󰟸 Base ⚡2
+wayclickctl waybar --format normal     # 󰟸 gaming        (default)
+wayclickctl waybar --format verbose    # 󰟸 gaming ⚡2
+wayclickctl waybar --format triggers   # 󰟸 ●●○○
 ```
 
-## Continuous Mode
+The `triggers` format shows up to 8 per-trigger activity dots:
+- `●` trigger is currently active (firing)
+- `○` trigger is idle
+- `✗` trigger has been user-disabled
 
-For lower latency updates, use continuous mode instead of Waybar's interval
-polling. This keeps a single process running and outputs JSON lines:
+## Event-driven vs Polling
 
-```jsonc
-{
-    "custom/wayclick": {
-        "exec": "wayclickctl waybar --continuous --interval 1",
-        "return-type": "json",
-        "tooltip": true,
-        "format": "{}",
-        "on-click": "wayclickctl toggle"
-    }
-}
+| Mode | How it works | Update latency |
+|------|-------------|---------------|
+| **Event-driven** (default) | Single long-running process; daemon pushes events over IPC | <50 ms |
+| **Polling fallback** | `"exec": "wayclickctl waybar"` + `"interval": 2` | ~2 s |
+
+Event-driven mode is recommended. It uses far less CPU (no repeated spawning)
+and reflects trigger activations in near real-time.
+
+## Trigger Flash
+
+When a trigger fires, `wayclickctl` briefly adds the `triggering` CSS class
+(default 400 ms) so you can animate the indicator:
+
+```bash
+wayclickctl waybar --continuous --flash-ms 600
 ```
 
-## Tooltip
+All themes in `style.css` include a `triggering` keyframe animation.
+Each triggering trigger also adds a `trigger-{id}` class so you can style
+individual triggers differently:
 
-Hovering the module shows a rich tooltip:
+```css
+#custom-wayclick.trigger-rapid-fire { color: #ff5555; }
+```
 
+## Layer Cycling
+
+Scroll the waybar widget to cycle through available layers in order.
+`wayclickctl` fetches the layer list from the daemon and wraps around:
+
+```bash
+wayclickctl layer cycle           # next layer
+wayclickctl layer cycle --backward  # previous layer
+wayclickctl layer list            # print all layers (current marked with *)
 ```
-wayclick: enabled
-Layer: gaming
-Triggers: 8 (2 active)
-Active: auto_click, rapid_fire
-Uptime: 2h 15m
+
+## Watching Live Events
+
+Stream all IPC events to stdout (useful for debugging or scripting):
+
+```bash
+wayclickctl watch          # human-readable
+wayclickctl watch --json   # raw JSON frames
 ```
+
+## Per-Trigger Enable/Disable
+
+Triggers can be toggled individually without touching the config:
+
+```bash
+wayclickctl trigger enable  rapid_fire
+wayclickctl trigger disable rapid_fire
+```
+
+The disabled state is reflected in the `list_triggers` IPC response and shown
+as `✗` in the tooltip.
 
 ## CSS Classes
-
-The module outputs CSS classes you can target for styling:
 
 | Class | Meaning |
 |-------|---------|
@@ -106,21 +161,25 @@ The module outputs CSS classes you can target for styling:
 | `disabled` | Daemon is disabled |
 | `active` | One or more triggers are currently firing |
 | `idle` | No triggers active |
-| `disconnected` | Daemon is not running |
-| `layer-{name}` | Current layer (e.g., `layer-base`, `layer-gaming`) |
+| `triggering` | A trigger just fired (held for `--flash-ms`) |
+| `disconnected` | Daemon is not running or unreachable |
 | `dry-run` | Daemon is in dry-run mode |
+| `layer-{name}` | Current layer (e.g. `layer-base`, `layer-gaming`) |
+| `trigger-{id}` | Added when that trigger fires (held for `--flash-ms`) |
 
-## Click Actions
+## Click and Scroll Actions
 
-| Click | Suggested Action |
-|-------|-----------------|
+| Action | Suggested Command |
+|--------|------------------|
 | Left click | `wayclickctl toggle` — toggle enabled/disabled |
 | Right click | `wayclickctl layer set base` — reset to base layer |
-| Middle click | `wayclickctl reload` — reload config |
-| Scroll up/down | Cycle layers (requires a custom script) |
+| Middle click | `wayclickctl reload` — reload config without restart |
+| Scroll up | `wayclickctl layer cycle` — next layer |
+| Scroll down | `wayclickctl layer cycle --backward` — previous layer |
 
 ## Requirements
 
 - [Waybar](https://github.com/Alexays/Waybar)
 - `wayclickctl` in your `$PATH`
-- A [Nerd Font](https://www.nerdfonts.com/) for the icon (e.g., JetBrainsMono Nerd Font)
+- A [Nerd Font](https://www.nerdfonts.com/) for the icon (e.g. JetBrainsMono Nerd Font)
+

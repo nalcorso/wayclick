@@ -8,28 +8,42 @@
 
 {
     "custom/wayclick": {
-        // One-shot mode: Waybar polls at the given interval.
-        // For continuous mode, replace "exec" with:
-        //   "exec": "wayclickctl waybar --continuous --interval 2"
-        // and remove "interval".
-        "exec": "wayclickctl waybar",
+        // ── Event-driven mode (recommended) ─────────────────────────────
+        // Keeps a single long-running process connected to the daemon.
+        // Updates are pushed in real time (<50ms latency) via IPC events.
+        // No "interval" key needed — the process streams JSON lines.
+        "exec": "wayclickctl waybar --continuous",
         "return-type": "json",
-        "interval": 2,
 
-        // Click actions
+        // ── One-shot / polling fallback ──────────────────────────────────
+        // Use this instead of the lines above if you prefer polling.
+        // Swap "exec" back to the one-shot form and set "interval".
+        //   "exec": "wayclickctl waybar",
+        //   "interval": 2,
+
+        // ── Click and scroll actions ─────────────────────────────────────
+        // Left-click: toggle the daemon on/off
         "on-click": "wayclickctl toggle",
+        // Right-click: jump back to the base layer
         "on-click-right": "wayclickctl layer set base",
+        // Middle-click: reload the config without restarting
+        "on-click-middle": "wayclickctl reload",
+        // Scroll up/down: cycle through available layers in order
+        "on-scroll-up": "wayclickctl layer cycle",
+        "on-scroll-down": "wayclickctl layer cycle --backward",
 
-        // Format with Nerd Font icon (icon comes from the script output)
+        // ── Display ──────────────────────────────────────────────────────
+        // The icon and text come from the script output.
+        // Swap --format to change what is shown:
+        //   minimal  →  󰟸
+        //   normal   →  󰟸 gaming          (default)
+        //   verbose  →  󰟸 gaming ⚡2
+        //   triggers →  󰟸 ●●○○            (per-trigger activity dots)
         "format": "{}",
-
-        // Tooltip is provided by the script output
         "tooltip": true,
 
-        // Format icons keyed to percentage (0 = disabled, 100 = enabled)
-        "format-icons": {
-            "0": "󰟸",
-            "100": "󰟸"
-        }
+        // Escape Pango markup in tooltip to avoid rendering issues
+        // if trigger/layer names contain special characters.
+        "escape": true
     }
 }

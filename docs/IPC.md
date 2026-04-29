@@ -131,12 +131,13 @@ Returns daemon state, active layer, trigger count, and version.
 ### list_triggers
 
 Returns all triggers (static + dynamic from all connections).
+Each entry now includes `activate_count`, `last_activated_ms`, and `user_enabled`.
 
 ```json
 → {"jsonrpc":"2.0","id":5,"method":"list_triggers","params":{}}
 ← {"jsonrpc":"2.0","id":5,"result":[
-    {"id":"rapid_fire","name":"Rapid Fire","mode":"toggle","action_type":"auto_click","active":false,"dynamic":false},
-    {"id":"plugin_trigger","name":"Plugin Trigger","mode":"oneshot","action_type":"keystroke","active":false,"dynamic":true}
+    {"id":"rapid_fire","name":"Rapid Fire","mode":"toggle","action_type":"auto_click","active":false,"dynamic":false,"activate_count":47,"last_activated_ms":1745760005000,"user_enabled":true},
+    {"id":"plugin_trigger","name":"Plugin Trigger","mode":"oneshot","action_type":"keystroke","active":false,"dynamic":true,"activate_count":0,"last_activated_ms":null,"user_enabled":true}
   ]}
 ```
 
@@ -183,9 +184,23 @@ errors, or an empty list if the config is valid.
 ← {"jsonrpc":"2.0","id":9,"result":{"valid":false,"errors":["interval_ms 0 is below minimum 1"]}}
 ```
 
-> **Note:** `check_config` and `list_layers` are available via IPC but are not
-> yet exposed as `wayclickctl` subcommands. Use IPC directly, or request them
-> from a script.
+
+### enable_trigger / disable_trigger
+
+Enable or disable an individual trigger without affecting others.
+The state survives config reload but is reset on daemon restart.
+
+```json
+→ {"jsonrpc":"2.0","id":10,"method":"enable_trigger","params":{"id":"rapid_fire"}}
+← {"jsonrpc":"2.0","id":10,"result":{"enabled":"rapid_fire"}}
+
+→ {"jsonrpc":"2.0","id":11,"method":"disable_trigger","params":{"id":"rapid_fire"}}
+← {"jsonrpc":"2.0","id":11,"result":{"disabled":"rapid_fire"}}
+```
+
+The `user_enabled` field in `list_triggers` responses reflects the current state.
+A disabled trigger shows `"user_enabled": false` and will not activate even if its
+button is pressed.
 
 ### logs
 

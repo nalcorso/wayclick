@@ -29,7 +29,7 @@ These work reliably and the API is stable:
 - **Hot-reload** — `SIGHUP` or `wayclickctl reload`
 - **Dry-run mode** — log all actions without emitting real events
 - **TUI dashboard** — real-time trigger state and log viewer
-- **Waybar integration** — status module with CSS themes
+- **Waybar integration** — event-driven status module with CSS themes, trigger flash, layer cycling, per-trigger dots
 
 ---
 
@@ -65,11 +65,14 @@ button events, so both the chord and the individual buttons would fire.
 
 ### No per-trigger enable/disable
 
-The global `wayclickctl toggle` / `enable` / `disable` commands affect all
+~~The global `wayclickctl toggle` / `enable` / `disable` commands affect all
 triggers at once. There is no way to disable a specific trigger while leaving
-others active.
+others active.~~
 
-**Workaround:** Use layers — put triggers you want to selectively disable on a
+**Implemented:** `wayclickctl trigger enable/disable <id>` and the
+`enable_trigger` / `disable_trigger` IPC methods are now available.
+
+**Workaround (old):** Use layers — put triggers you want to selectively disable on a
 separate layer and switch away from it.
 
 ### Dynamic triggers are connection-scoped
@@ -88,8 +91,12 @@ macro. All configs must be written by hand.
 
 ### wayclickctl does not expose check_config or list_layers
 
-The `check_config` and `list_layers` IPC methods exist and work, but there are
-no corresponding `wayclickctl` subcommands for them. Use IPC directly or the TUI.
+~~The `check_config` and `list_layers` IPC methods exist and work, but there are
+no corresponding `wayclickctl` subcommands for them. Use IPC directly or the TUI.~~
+
+**Implemented:** `wayclickctl check-config <path>`, `wayclickctl layer list`,
+`wayclickctl layer cycle [--backward]`, and `wayclickctl watch [--json]` are
+now available.
 
 ---
 
@@ -110,10 +117,13 @@ This will make `set_profile()` functional.
 Detect the active keyboard layout via XKB and map characters to the correct
 physical keys. This makes `type_text` usable on non-US keyboard layouts.
 
-### Per-trigger enable/disable
+### ~~Per-trigger enable/disable~~
 
-Add IPC methods `enable_trigger` and `disable_trigger` to selectively pause
-individual triggers without affecting others.
+~~Add IPC methods `enable_trigger` and `disable_trigger` to selectively pause
+individual triggers without affecting others.~~
+
+**Done** — implemented in `crates/wayclick-core` (engine + IPC) and exposed as
+`wayclickctl trigger enable/disable <id>`.
 
 ### Persistent dynamic triggers
 
@@ -127,10 +137,13 @@ Allow chords that span multiple physical devices — for example, holding a
 keyboard key while pressing a mouse button. Currently chords are limited to
 buttons on the same device.
 
-### wayclickctl check-config and list-layers
+### ~~wayclickctl check-config and list-layers~~
 
-Expose the `check_config` and `list_layers` IPC methods as `wayclickctl`
-subcommands.
+~~Expose the `check_config` and `list_layers` IPC methods as `wayclickctl`
+subcommands.~~
+
+**Done** — `check-config`, `layer list`, `layer cycle`, and `watch` are all
+available in the current release.
 
 ### Per-trigger cooldown and burst-fire controls
 

@@ -166,6 +166,13 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
             make_response(id, serde_json::to_value(&triggers).unwrap_or(json!([])))
         }
 
+        "list_layers" => {
+            let engine = engine.lock().unwrap();
+            let layers = engine.available_layers();
+            let current = engine.current_layer().to_string();
+            make_response(id, json!({ "layers": layers, "current": current }))
+        }
+
         "reload_config" => {
             // Config reload is handled by the daemon; IPC just signals it
             make_response(id, json!({ "reloading": true }))
@@ -209,6 +216,34 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
         "get_layer" => {
             let engine = engine.lock().unwrap();
             make_response(id, json!({ "layer": engine.current_layer() }))
+        }
+
+        "enable_trigger" => {
+            let trigger_id = params
+                .and_then(|p| p.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if trigger_id.is_empty() {
+                return make_error(id, -32602, "Missing 'id' parameter");
+            }
+            match with_engine_events(engine, |eng| eng.enable_trigger(trigger_id)) {
+                Ok(()) => make_response(id, json!({ "enabled": trigger_id })),
+                Err(e) => make_error(id, -32602, &e.to_string()),
+            }
+        }
+
+        "disable_trigger" => {
+            let trigger_id = params
+                .and_then(|p| p.get("id"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            if trigger_id.is_empty() {
+                return make_error(id, -32602, "Missing 'id' parameter");
+            }
+            match with_engine_events(engine, |eng| eng.disable_trigger(trigger_id)) {
+                Ok(()) => make_response(id, json!({ "disabled": trigger_id })),
+                Err(e) => make_error(id, -32602, &e.to_string()),
+            }
         }
 
         _ => make_error(id, -32601, &format!("Method not found: {}", method)),
@@ -607,15 +642,24 @@ fn parse_event_filter(params: Option<&Value>) -> Option<Vec<EventType>> {
     if types.is_empty() { None } else { Some(types) }
 }
 
+/// Client-side helper: connect to daemon socket with read/write timeouts set.
+/// Returns a connected `UnixStream` that callers can use for framed IPC communication.
+/// Use this for long-lived streaming connections (e.g. event subscriptions).
+pub fn ipc_connect(socket_path: &Path, timeout_ms: u64) -> Result<UnixStream, IpcError> {
+    let stream = UnixStream::connect(socket_path)?;
+    let timeout = Duration::from_millis(timeout_ms);
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    Ok(stream)
+}
+
 /// Client-side helper: connect to daemon and send a single request, return response.
 pub fn ipc_request(
     socket_path: &Path,
     method: &str,
     params: Option<Value>,
 ) -> Result<Value, IpcError> {
-    let mut stream = UnixStream::connect(socket_path)?;
-    stream.set_read_timeout(Some(Duration::from_secs(5)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(5)))?;
+    let mut stream = ipc_connect(socket_path, 5000)?;
 
     let request = json!({
         "jsonrpc": "2.0",

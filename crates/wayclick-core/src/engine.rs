@@ -4,11 +4,11 @@ use crate::input_backend::{BackendError, InputBackend};
 use crate::logger::Logger;
 use rand::Rng;
 use serde::Serialize;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -17,6 +17,8 @@ pub enum EngineError {
     UnknownTrigger(String),
     #[error("Engine is disabled")]
     Disabled,
+    #[error("Trigger is disabled")]
+    TriggerDisabled(String),
     #[error("Trigger is in cooldown")]
     Cooldown,
     #[error("Backend error: {0}")]
@@ -40,6 +42,13 @@ enum TriggerState {
     },
 }
 
+/// Per-trigger activation statistics (accumulated at runtime, reset on daemon restart).
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct TriggerStats {
+    pub activate_count: u64,
+    pub last_activated_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct TriggerSnapshot {
     pub id: String,
@@ -49,6 +58,12 @@ pub struct TriggerSnapshot {
     pub active: bool,
     /// `true` if this trigger was registered dynamically via IPC.
     pub dynamic: bool,
+    /// Number of times this trigger has been activated since daemon start.
+    pub activate_count: u64,
+    /// Unix timestamp (ms) of the last activation, or `null` if never activated.
+    pub last_activated_ms: Option<u64>,
+    /// `false` if the trigger has been individually disabled via `disable_trigger`.
+    pub user_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -82,6 +97,10 @@ pub struct Engine {
     start_time: Instant,
     config_path: String,
     current_layer: String,
+    /// Per-trigger activation statistics (fire count, last activated).
+    trigger_stats: HashMap<String, TriggerStats>,
+    /// Per-trigger user-controlled enabled flag (defaults to true when absent).
+    trigger_enabled: HashMap<String, bool>,
     /// Events accumulated during a method call; drained and published by `with_engine_events`
     /// *after* the engine `Mutex` is released, preventing lock-order inversions.
     pending_events: Vec<Event>,
@@ -110,6 +129,8 @@ impl Engine {
             start_time: Instant::now(),
             config_path,
             current_layer: "base".to_string(),
+            trigger_stats: HashMap::new(),
+            trigger_enabled: HashMap::new(),
             pending_events: Vec::new(),
         }
     }
@@ -178,6 +199,11 @@ impl Engine {
             return Err(EngineError::Disabled);
         }
 
+        // Check per-trigger enabled flag.
+        if !self.trigger_enabled.get(id).copied().unwrap_or(true) {
+            return Err(EngineError::TriggerDisabled(id.to_string()));
+        }
+
         // Check static triggers first, then dynamic.
         let trigger = self
             .config
@@ -231,12 +257,14 @@ impl Engine {
                     return Err(EngineError::Cooldown);
                 }
                 self.start_worker(trigger)?;
+                self.record_activation(&trigger.id);
                 self.pending_events
                     .push(Event::trigger_activated(trigger.id.clone()));
                 Ok(())
             }
             TriggerState::Idle => {
                 self.start_worker(trigger)?;
+                self.record_activation(&trigger.id);
                 self.pending_events
                     .push(Event::trigger_activated(trigger.id.clone()));
                 Ok(())
@@ -251,6 +279,7 @@ impl Engine {
                 TriggerState::Active { .. } => Ok(()), // Already active
                 _ => {
                     self.start_worker(trigger)?;
+                    self.record_activation(&trigger.id);
                     self.pending_events
                         .push(Event::trigger_activated(trigger.id.clone()));
                     Ok(())
@@ -269,6 +298,7 @@ impl Engine {
         self.logger
             .info(format!("{}: oneshot executing", trigger.id));
 
+        self.record_activation(&trigger.id);
         self.pending_events
             .push(Event::trigger_activated(trigger.id.clone()));
 
@@ -333,6 +363,17 @@ impl Engine {
         }
     }
 
+    /// Record an activation in the trigger's stats.
+    fn record_activation(&mut self, id: &str) {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        let stats = self.trigger_stats.entry(id.to_string()).or_default();
+        stats.activate_count += 1;
+        stats.last_activated_ms = Some(now_ms);
+    }
+
     pub fn describe_status(&self) -> StatusReport {
         let active_triggers: Vec<String> = self
             .state
@@ -360,6 +401,8 @@ impl Engine {
             .iter()
             .map(|t| {
                 let active = matches!(self.state.get(&t.id), Some(TriggerState::Active { .. }));
+                let stats = self.trigger_stats.get(&t.id).cloned().unwrap_or_default();
+                let user_enabled = self.trigger_enabled.get(&t.id).copied().unwrap_or(true);
                 TriggerSnapshot {
                     id: t.id.clone(),
                     name: t.name.clone(),
@@ -367,12 +410,17 @@ impl Engine {
                     action_type: t.action.type_name().to_string(),
                     active,
                     dynamic: false,
+                    activate_count: stats.activate_count,
+                    last_activated_ms: stats.last_activated_ms,
+                    user_enabled,
                 }
             })
             .collect();
 
         for (id, entry) in &self.dynamic_triggers {
             let active = matches!(self.state.get(id), Some(TriggerState::Active { .. }));
+            let stats = self.trigger_stats.get(id).cloned().unwrap_or_default();
+            let user_enabled = self.trigger_enabled.get(id).copied().unwrap_or(true);
             snapshots.push(TriggerSnapshot {
                 id: id.clone(),
                 name: entry.trigger.name.clone(),
@@ -380,6 +428,9 @@ impl Engine {
                 action_type: entry.trigger.action.type_name().to_string(),
                 active,
                 dynamic: true,
+                activate_count: stats.activate_count,
+                last_activated_ms: stats.last_activated_ms,
+                user_enabled,
             });
         }
 
@@ -456,6 +507,8 @@ impl Engine {
             self.stop_worker(&id);
             self.state.remove(&id);
             self.dynamic_triggers.remove(&id);
+            self.trigger_enabled.remove(&id);
+            self.trigger_stats.remove(&id);
         }
     }
 
@@ -474,6 +527,8 @@ impl Engine {
             .map(|(id, entry)| {
                 let active =
                     matches!(self.state.get(id), Some(TriggerState::Active { .. }));
+                let stats = self.trigger_stats.get(id).cloned().unwrap_or_default();
+                let user_enabled = self.trigger_enabled.get(id).copied().unwrap_or(true);
                 TriggerSnapshot {
                     id: id.clone(),
                     name: entry.trigger.name.clone(),
@@ -481,9 +536,63 @@ impl Engine {
                     action_type: entry.trigger.action.type_name().to_string(),
                     active,
                     dynamic: true,
+                    activate_count: stats.activate_count,
+                    last_activated_ms: stats.last_activated_ms,
+                    user_enabled,
                 }
             })
             .collect()
+    }
+
+    /// Enable a specific trigger (reverses a previous `disable_trigger` call).
+    pub fn enable_trigger(&mut self, id: &str) -> Result<(), EngineError> {
+        if !self.config.triggers.iter().any(|t| t.id == id)
+            && !self.dynamic_triggers.contains_key(id)
+        {
+            return Err(EngineError::UnknownTrigger(id.to_string()));
+        }
+        self.trigger_enabled.insert(id.to_string(), true);
+        self.logger.info(format!("trigger '{}' enabled", id));
+        Ok(())
+    }
+
+    /// Disable a specific trigger without removing it. A disabled trigger will not fire
+    /// until re-enabled. Any active worker is stopped immediately.
+    pub fn disable_trigger(&mut self, id: &str) -> Result<(), EngineError> {
+        if !self.config.triggers.iter().any(|t| t.id == id)
+            && !self.dynamic_triggers.contains_key(id)
+        {
+            return Err(EngineError::UnknownTrigger(id.to_string()));
+        }
+        self.stop_worker(id);
+        self.trigger_enabled.insert(id.to_string(), false);
+        self.logger.info(format!("trigger '{}' disabled", id));
+        Ok(())
+    }
+
+    /// Return all layer names referenced by the current config.
+    /// Always includes `"base"`. Results are sorted alphabetically.
+    pub fn available_layers(&self) -> Vec<String> {
+        let mut layers: BTreeSet<String> = BTreeSet::new();
+        layers.insert("base".to_string());
+
+        for device_binding in &self.config.device_bindings {
+            for binding in &device_binding.bindings {
+                let layer = match binding {
+                    Binding::Button(b) => b.layer.as_deref(),
+                    Binding::Scroll(s) => s.layer.as_deref(),
+                };
+                if let Some(l) = layer {
+                    layers.insert(l.to_string());
+                }
+            }
+        }
+
+        for rule in &self.config.profile_rules {
+            layers.insert(rule.layer.clone());
+        }
+
+        layers.into_iter().collect()
     }
     /// Drains accumulated pending events, returning them for publishing after the engine lock is
     /// released. Use `with_engine_events` rather than calling this directly.
