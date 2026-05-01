@@ -11,6 +11,148 @@ use crate::ipc_client::FocusedWindow;
 use crate::particles::ParticleSystem;
 use crate::perf::PerfCounters;
 
+// ─── Layout ───────────────────────────────────────────────────────────────
+
+pub const SECTION_HEADER_H: f32 = 30.0;
+pub const FOCUS_CONTENT_H: f32 = 68.0;
+pub const TRIGGER_ROW_H: f32 = 26.0;
+pub const TRIGGER_MAX_ROWS: usize = 10;
+pub const TRIGGER_PAD: f32 = 14.0;
+pub const LOG_MIN_H: f32 = 80.0;
+
+/// Pre-computed sidebar section heights and Y positions for one frame.
+pub struct SidebarLayout {
+    pub panel_x: f32,
+    pub panel_w: f32,
+    pub focus_y: f32,
+    pub focus_h: f32,
+    pub triggers_y: f32,
+    pub triggers_h: f32,
+    pub log_y: f32,
+    pub log_h: f32,
+}
+
+impl SidebarLayout {
+    pub fn compute(
+        sw: f32,
+        sh: f32,
+        hud_h: f32,
+        status_h: f32,
+        panel_w: f32,
+        focus_expanded: bool,
+        triggers_expanded: bool,
+        log_expanded: bool,
+        trigger_count: usize,
+    ) -> Self {
+        let panel_x = sw - panel_w;
+        let available = sh - hud_h - status_h;
+
+        let focus_h = if focus_expanded {
+            SECTION_HEADER_H + FOCUS_CONTENT_H
+        } else {
+            SECTION_HEADER_H
+        };
+
+        let triggers_h = if triggers_expanded {
+            let rows = trigger_count.min(TRIGGER_MAX_ROWS);
+            let content = (rows as f32 * TRIGGER_ROW_H + TRIGGER_PAD).max(TRIGGER_ROW_H);
+            SECTION_HEADER_H + content
+        } else {
+            SECTION_HEADER_H
+        };
+
+        let log_h = if log_expanded {
+            (available - focus_h - triggers_h).max(LOG_MIN_H)
+        } else {
+            SECTION_HEADER_H
+        };
+
+        let focus_y = hud_h;
+        let triggers_y = focus_y + focus_h;
+        let log_y = triggers_y + triggers_h;
+
+        SidebarLayout {
+            panel_x,
+            panel_w,
+            focus_y,
+            focus_h,
+            triggers_y,
+            triggers_h,
+            log_y,
+            log_h,
+        }
+    }
+}
+
+// ─── Section header helper ────────────────────────────────────────────────
+
+/// Draw a clickable section header bar. Returns true if clicked this frame.
+fn draw_section_header(
+    x: f32,
+    y: f32,
+    w: f32,
+    title: &str,
+    badge: Option<&str>,
+    expanded: bool,
+    mx: f32,
+    my: f32,
+    font: &Font,
+) -> bool {
+    let h = SECTION_HEADER_H;
+    let hovered = mx >= x && mx < x + w && my >= y && my < y + h;
+
+    if hovered {
+        draw_rectangle(x, y, w, h, Color::new(1.0, 1.0, 1.0, 0.04));
+    }
+
+    let chevron = if expanded { "▼" } else { "▶" };
+    let ty = y + h * 0.68;
+    let sz: u16 = 13;
+
+    draw_text_ex(
+        chevron,
+        x + 8.0,
+        ty,
+        TextParams {
+            font_size: sz,
+            font: Some(font),
+            color: colors::TEXT_DIM,
+            ..Default::default()
+        },
+    );
+
+    draw_text_ex(
+        title,
+        x + 24.0,
+        ty,
+        TextParams {
+            font_size: 13,
+            font: Some(font),
+            color: colors::TITLE,
+            ..Default::default()
+        },
+    );
+
+    if let Some(badge_text) = badge {
+        let title_w = measure_text(title, Some(font), sz, 1.0).width;
+        draw_text_ex(
+            badge_text,
+            x + 24.0 + title_w + 6.0,
+            ty,
+            TextParams {
+                font_size: 12,
+                font: Some(font),
+                color: colors::TEXT_DIM,
+                ..Default::default()
+            },
+        );
+    }
+
+    draw_line(x, y + h, x + w, y + h, 1.0, colors::GRID);
+
+    hovered && is_mouse_button_pressed(MouseButton::Left)
+}
+
 // ─── Text helpers ──────────────────────────────────────────────────────────
 
 fn draw_text_outlined(text: &str, x: f32, y: f32, size: f32, color: Color, font: Option<&Font>) {
@@ -200,7 +342,8 @@ fn format_duration(secs: f64) -> String {
 
 // ─── Trigger list panel ────────────────────────────────────────────────────
 
-/// Draw the trigger list. Returns the index of the clicked trigger (if any).
+/// Draw the trigger list panel.
+/// Returns `(clicked_item_index, header_was_clicked)`.
 pub fn draw_trigger_list(
     x: f32,
     y: f32,
@@ -211,46 +354,42 @@ pub fn draw_trigger_list(
     selected: Option<usize>,
     mx: f32,
     my: f32,
+    expanded: bool,
     font: &Font,
-) -> Option<usize> {
+) -> (Option<usize>, bool) {
     draw_rectangle(x, y, w, h, colors::LOG_BG);
+
+    let badge = if triggers.is_empty() {
+        None
+    } else {
+        Some(format!("({})", triggers.len()))
+    };
+    let header_clicked = draw_section_header(
+        x,
+        y,
+        w,
+        "TRIGGERS",
+        badge.as_deref(),
+        expanded,
+        mx,
+        my,
+        font,
+    );
+
+    if !expanded {
+        return (None, header_clicked);
+    }
 
     let pad = 8.0;
     let sz: u16 = 13;
-    let row_h = 26.0;
-
-    draw_text_ex(
-        "TRIGGERS",
-        x + pad,
-        y + 18.0,
-        TextParams {
-            font_size: 14,
-            font: Some(font),
-            color: colors::TITLE,
-            ..Default::default()
-        },
-    );
-    if !triggers.is_empty() {
-        let count_text = format!("({})", triggers.len());
-        draw_text_ex(
-            &count_text,
-            x + pad + 72.0,
-            y + 18.0,
-            TextParams {
-                font_size: 12,
-                font: Some(font),
-                color: colors::TEXT_DIM,
-                ..Default::default()
-            },
-        );
-    }
-    draw_line(x + pad, y + 24.0, x + w - pad, y + 24.0, 1.0, colors::GRID);
+    let row_h = TRIGGER_ROW_H;
+    let content_y = y + SECTION_HEADER_H;
 
     if triggers.is_empty() {
         draw_text_ex(
             "No triggers loaded",
             x + pad,
-            y + 46.0,
+            content_y + 20.0,
             TextParams {
                 font_size: sz - 1,
                 font: Some(font),
@@ -258,12 +397,11 @@ pub fn draw_trigger_list(
                 ..Default::default()
             },
         );
-        draw_line(x + pad, y + h - 1.0, x + w - pad, y + h - 1.0, 1.0, colors::GRID);
-        return None;
+        return (None, header_clicked);
     }
 
-    let list_y_start = y + 32.0;
-    let visible_rows = ((h - 42.0) / row_h).max(0.0) as usize;
+    let list_y_start = content_y + 4.0;
+    let visible_rows = ((h - SECTION_HEADER_H - 12.0) / row_h).max(0.0) as usize;
     let mut clicked = None;
 
     for (vis_idx, abs_idx) in (scroll..).enumerate().take(visible_rows) {
@@ -272,7 +410,7 @@ pub fn draw_trigger_list(
         }
         let entry = &triggers[abs_idx];
         let ry = list_y_start + vis_idx as f32 * row_h;
-        if ry + row_h > y + h - 10.0 {
+        if ry + row_h > y + h - 4.0 {
             break;
         }
 
@@ -345,9 +483,8 @@ pub fn draw_trigger_list(
         );
     }
 
-    if triggers.len() > visible_rows {
-        let max_shown = scroll + visible_rows;
-        let shown = max_shown.min(triggers.len());
+    if triggers.len() > visible_rows + scroll {
+        let shown = (scroll + visible_rows).min(triggers.len());
         let scroll_text = format!("↕ {}/{}", shown, triggers.len());
         draw_text_ex(
             &scroll_text,
@@ -362,42 +499,51 @@ pub fn draw_trigger_list(
         );
     }
 
-    draw_line(x + pad, y + h - 1.0, x + w - pad, y + h - 1.0, 1.0, colors::GRID);
-    clicked
+    (clicked, header_clicked)
 }
 
 // ─── Focused window widget ─────────────────────────────────────────────────
 
+/// Draw the focused window panel.
+/// Returns true if the section header was clicked (toggle expand/collapse).
 pub fn draw_focus_widget(
     x: f32,
     y: f32,
     w: f32,
     h: f32,
     window: Option<&FocusedWindow>,
+    expanded: bool,
+    mx: f32,
+    my: f32,
     font: &Font,
-) {
+) -> bool {
     draw_rectangle(x, y, w, h, colors::FOCUS_WIDGET_BG);
-    draw_line(x + 8.0, y + 24.0, x + w - 8.0, y + 24.0, 1.0, colors::GRID);
 
-    draw_text_ex(
+    let header_clicked = draw_section_header(
+        x,
+        y,
+        w,
         "FOCUSED WINDOW",
-        x + 8.0,
-        y + 18.0,
-        TextParams {
-            font_size: 13,
-            font: Some(font),
-            color: colors::FOCUS_WIDGET_LABEL,
-            ..Default::default()
-        },
+        None,
+        expanded,
+        mx,
+        my,
+        font,
     );
 
+    if !expanded {
+        return header_clicked;
+    }
+
     let sz: u16 = 13;
+    let content_y = y + SECTION_HEADER_H;
+
     match window {
         None => {
             draw_text_ex(
                 "⊙  —",
                 x + 8.0,
-                y + 44.0,
+                content_y + 18.0,
                 TextParams {
                     font_size: sz,
                     font: Some(font),
@@ -417,7 +563,7 @@ pub fn draw_focus_widget(
             draw_text_ex(
                 &app_text,
                 x + 8.0,
-                y + 42.0,
+                content_y + 16.0,
                 TextParams {
                     font_size: sz,
                     font: Some(font),
@@ -431,7 +577,7 @@ pub fn draw_focus_widget(
                 draw_text_ex(
                     &title_text,
                     x + 8.0,
-                    y + 60.0,
+                    content_y + 34.0,
                     TextParams {
                         font_size: sz - 1,
                         font: Some(font),
@@ -442,40 +588,43 @@ pub fn draw_focus_widget(
             }
         }
     }
-    draw_line(x + 8.0, y + h - 1.0, x + w - 8.0, y + h - 1.0, 1.0, colors::GRID);
+    header_clicked
 }
 
 // ─── Event log (right panel) ──────────────────────────────────────────────
 
-pub fn draw_event_log(x: f32, y: f32, w: f32, h: f32, events: &EventRing, font: &Font) {
+/// Draw the event log panel.
+/// Returns true if the section header was clicked (toggle expand/collapse).
+pub fn draw_event_log(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    events: &EventRing,
+    expanded: bool,
+    mx: f32,
+    my: f32,
+    font: &Font,
+) -> bool {
     draw_rectangle(x, y, w, h, colors::LOG_BG);
+
+    let header_clicked =
+        draw_section_header(x, y, w, "EVENT LOG", None, expanded, mx, my, font);
+
+    if !expanded {
+        return header_clicked;
+    }
 
     let sz: u16 = 13;
     let line_h = 18.0;
     let pad = 8.0;
+    let content_y = y + SECTION_HEADER_H + 6.0;
 
-    draw_text_ex(
-        "EVENT LOG",
-        x + pad,
-        y + 20.0,
-        TextParams {
-            font_size: 14,
-            font: Some(font),
-            color: colors::TITLE,
-            ..Default::default()
-        },
-    );
-    draw_line(x + pad, y + 26.0, x + w - pad, y + 26.0, 1.0, colors::GRID);
-
-    let max_lines = ((h - 36.0) / line_h) as usize;
-    let start = if events.len() > max_lines {
-        events.len() - max_lines
-    } else {
-        0
-    };
+    let max_lines = ((h - SECTION_HEADER_H - 12.0) / line_h).max(0.0) as usize;
+    let start = events.len().saturating_sub(max_lines);
 
     for (i, te) in events.iter().skip(start).enumerate() {
-        let ly = y + 42.0 + i as f32 * line_h;
+        let ly = content_y + i as f32 * line_h;
         if ly + line_h > y + h {
             break;
         }
@@ -493,7 +642,6 @@ pub fn draw_event_log(x: f32, y: f32, w: f32, h: f32, events: &EventRing, font: 
             },
         );
 
-        // Source indicator: ● = IPC (normal), ○ = local macroquad fallback
         let (src_glyph, src_color) = if te.event.is_local_source() {
             ("○", colors::SOURCE_LOCAL)
         } else {
@@ -525,6 +673,8 @@ pub fn draw_event_log(x: f32, y: f32, w: f32, h: f32, events: &EventRing, font: 
             },
         );
     }
+
+    header_clicked
 }
 
 // ─── Status bar (bottom) ──────────────────────────────────────────────────

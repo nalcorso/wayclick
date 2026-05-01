@@ -13,6 +13,7 @@ use events::EventRing;
 use ipc_client::spawn_ipc_thread;
 use particles::ParticleSystem;
 use perf::PerfCounters;
+use ui::SidebarLayout;
 
 fn window_conf() -> Conf {
     Conf {
@@ -50,6 +51,10 @@ async fn main() {
     let mut bloom_target = render_target(screen_width() as u32, screen_height() as u32);
     bloom_target.texture.set_filter(FilterMode::Linear);
 
+    const RIGHT_PANEL_W: f32 = 340.0;
+    const HUD_H: f32 = 44.0;
+    const STATUS_H: f32 = 32.0;
+
     loop {
         let dt = get_frame_time();
         let now = get_time();
@@ -86,9 +91,25 @@ async fn main() {
         );
         perf.tick(dt);
 
-        // --- Trigger list scroll (when cursor is in right panel) ---
-        let right_panel_w = 340.0_f32;
-        if mx >= sw - right_panel_w {
+        // --- Compute sidebar layout ---
+        let layout = SidebarLayout::compute(
+            sw,
+            sh,
+            HUD_H,
+            STATUS_H,
+            RIGHT_PANEL_W,
+            app_state.focus_expanded,
+            app_state.triggers_expanded,
+            app_state.log_expanded,
+            app_state.triggers.len(),
+        );
+
+        // --- Trigger list scroll (when cursor is in triggers section) ---
+        if app_state.triggers_expanded
+            && mx >= layout.panel_x
+            && my >= layout.triggers_y
+            && my < layout.triggers_y + layout.triggers_h
+        {
             let (_, sy) = mouse_wheel();
             if sy > 0.5 && app_state.trigger_scroll > 0 {
                 app_state.trigger_scroll -= 1;
@@ -103,15 +124,8 @@ async fn main() {
         // --- Particle update ---
         particles.update(dt);
 
-        // Layout constants
-        let hud_h = 44.0_f32;
-        let status_h = 32.0_f32;
-        let canvas_w = sw - right_panel_w;
-        let canvas_h = sh - hud_h - status_h;
-
-        let trigger_list_h = 300.0_f32;
-        let focus_h = 76.0_f32;
-        let log_h = (sh - status_h - hud_h - trigger_list_h - focus_h).max(60.0);
+        let canvas_w = sw - RIGHT_PANEL_W;
+        let canvas_h = sh - HUD_H - STATUS_H;
 
         // ============================================================
         // Pass 1: Render particles to off-screen target for bloom
@@ -161,17 +175,15 @@ async fn main() {
         ui::draw_cursor(mx, my, now as f32);
 
         // Held keys display
-        ui::draw_held_keys(canvas_w, canvas_h, hud_h, &font);
+        ui::draw_held_keys(canvas_w, canvas_h, HUD_H, &font);
 
         // Floating key labels
         ui::draw_key_labels(&mut particles, canvas_w, &font);
 
         // --- UI Panels ---
-        let panel_x = sw - right_panel_w;
-
         ui::draw_hud(
             sw,
-            hud_h,
+            HUD_H,
             &perf,
             now - start_time,
             &app_state.connection,
@@ -182,40 +194,63 @@ async fn main() {
             &font_bold,
         );
 
-        let trigger_y = hud_h;
-        if let Some(clicked_idx) = ui::draw_trigger_list(
-            panel_x,
-            trigger_y,
-            right_panel_w,
-            trigger_list_h,
+        // Focused window (top of sidebar)
+        if ui::draw_focus_widget(
+            layout.panel_x,
+            layout.focus_y,
+            layout.panel_w,
+            layout.focus_h,
+            app_state.focused_window.as_ref(),
+            app_state.focus_expanded,
+            mx,
+            my,
+            &font,
+        ) {
+            app_state.focus_expanded = !app_state.focus_expanded;
+        }
+
+        // Triggers list
+        let (trigger_click, trigger_header_click) = ui::draw_trigger_list(
+            layout.panel_x,
+            layout.triggers_y,
+            layout.panel_w,
+            layout.triggers_h,
             &app_state.triggers,
             app_state.trigger_scroll,
             app_state.selected_trigger,
             mx,
             my,
-            &font,
-        ) {
-            app_state.selected_trigger = Some(clicked_idx);
-            app_state.toggle_trigger_enabled(clicked_idx);
-        }
-
-        let focus_y = trigger_y + trigger_list_h;
-        ui::draw_focus_widget(
-            panel_x,
-            focus_y,
-            right_panel_w,
-            focus_h,
-            app_state.focused_window.as_ref(),
+            app_state.triggers_expanded,
             &font,
         );
+        if trigger_header_click {
+            app_state.triggers_expanded = !app_state.triggers_expanded;
+            app_state.trigger_scroll = 0;
+        }
+        if let Some(idx) = trigger_click {
+            app_state.selected_trigger = Some(idx);
+            app_state.toggle_trigger_enabled(idx);
+        }
 
-        let log_y = focus_y + focus_h;
-        ui::draw_event_log(panel_x, log_y, right_panel_w, log_h, &events, &font);
+        // Event log (fills remaining space)
+        if ui::draw_event_log(
+            layout.panel_x,
+            layout.log_y,
+            layout.panel_w,
+            layout.log_h,
+            &events,
+            app_state.log_expanded,
+            mx,
+            my,
+            &font,
+        ) {
+            app_state.log_expanded = !app_state.log_expanded;
+        }
 
         ui::draw_status_bar(
             sw,
             sh,
-            status_h,
+            STATUS_H,
             mx,
             my,
             &perf,
@@ -226,9 +261,16 @@ async fn main() {
         );
 
         // Panel separator lines
-        draw_line(0.0, hud_h, sw, hud_h, 1.0, colors::GRID);
-        draw_line(panel_x, hud_h, panel_x, sh - status_h, 1.0, colors::GRID);
-        draw_line(0.0, sh - status_h, sw, sh - status_h, 1.0, colors::GRID);
+        draw_line(0.0, HUD_H, sw, HUD_H, 1.0, colors::GRID);
+        draw_line(
+            layout.panel_x,
+            HUD_H,
+            layout.panel_x,
+            sh - STATUS_H,
+            1.0,
+            colors::GRID,
+        );
+        draw_line(0.0, sh - STATUS_H, sw, sh - STATUS_H, 1.0, colors::GRID);
 
         next_frame().await;
     }

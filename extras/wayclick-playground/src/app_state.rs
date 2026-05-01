@@ -37,6 +37,10 @@ pub struct AppState {
     pub trigger_scroll: usize,
     pub selected_trigger: Option<usize>,
     pub focused_window: Option<FocusedWindow>,
+    // Section expand/collapse state
+    pub focus_expanded: bool,
+    pub triggers_expanded: bool,
+    pub log_expanded: bool,
 
     ipc_rx: Receiver<IpcMessage>,
     ipc_cmd_tx: Sender<IpcCommand>,
@@ -53,6 +57,9 @@ impl AppState {
             trigger_scroll: 0,
             selected_trigger: None,
             focused_window: None,
+            focus_expanded: true,
+            triggers_expanded: true,
+            log_expanded: true,
             ipc_rx,
             ipc_cmd_tx,
         }

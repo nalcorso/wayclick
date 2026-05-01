@@ -38,4 +38,3 @@ pub const SOURCE_LOCAL: Color = Color::new(1.0, 0.7, 0.2, 0.85); // amber — ma
 // Focus tracker
 pub const FOCUS_CHANGE: Color = Color::new(0.7, 0.5, 1.0, 0.9); // soft lavender
 pub const FOCUS_WIDGET_BG: Color = Color::new(0.06, 0.04, 0.12, 0.9); // deep purple tint
-pub const FOCUS_WIDGET_LABEL: Color = Color::new(0.55, 0.38, 0.85, 1.0); // muted purple label
