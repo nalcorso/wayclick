@@ -54,6 +54,9 @@ pub fn draw_hud(
     perf: &PerfCounters,
     session_secs: f64,
     connection: &ConnectionStatus,
+    service_enabled: bool,
+    dry_run: bool,
+    layer: &str,
     font: &Font,
     font_bold: &Font,
 ) {
@@ -104,16 +107,48 @@ pub fn draw_hud(
         x += w + 28.0;
     }
 
-    // Connection badge at far right
+    // Connection badge + layer/state at far right
     let (badge_text, badge_color) = match connection {
         ConnectionStatus::Connected => ("● LIVE", colors::SERVICE_ONLINE),
         ConnectionStatus::Connecting => ("◌ SYNC", colors::MIDDLE_CLICK),
         ConnectionStatus::Disconnected => ("○ OFFLINE", colors::SERVICE_OFFLINE),
     };
     let badge_dims = measure_text(badge_text, Some(font), sz, 1.0);
+
+    // When connected, compose layer + state annotations (rendered separately for distinct colors)
+    let (layer_ann, state_ann) = if matches!(connection, ConnectionStatus::Connected) {
+        let layer_part = if !layer.is_empty() {
+            format!("  ↪ {}  ", truncate_str(layer, 12))
+        } else {
+            "  ".to_string()
+        };
+        let state_part = if dry_run {
+            "DRY-RUN"
+        } else if service_enabled {
+            "ENABLED"
+        } else {
+            "DISABLED"
+        };
+        (layer_part, state_part.to_string())
+    } else {
+        (String::new(), String::new())
+    };
+    let layer_dims = measure_text(&layer_ann, Some(font), sz - 2, 1.0);
+    let state_dims = measure_text(&state_ann, Some(font), sz - 2, 1.0);
+    let ann_total_w = layer_dims.width + state_dims.width;
+
+    let state_color = if dry_run {
+        colors::MIDDLE_CLICK
+    } else if service_enabled {
+        colors::TRIGGER_ACTIVE
+    } else {
+        colors::TRIGGER_DISABLED
+    };
+
+    let badge_x = width - badge_dims.width - ann_total_w - 12.0;
     draw_text_ex(
         badge_text,
-        width - badge_dims.width - 12.0,
+        badge_x,
         y,
         TextParams {
             font_size: sz,
@@ -122,6 +157,32 @@ pub fn draw_hud(
             ..Default::default()
         },
     );
+    if !layer_ann.is_empty() {
+        draw_text_ex(
+            &layer_ann,
+            badge_x + badge_dims.width,
+            y,
+            TextParams {
+                font_size: sz - 2,
+                font: Some(font),
+                color: colors::LAYER_BADGE,
+                ..Default::default()
+            },
+        );
+    }
+    if !state_ann.is_empty() {
+        draw_text_ex(
+            &state_ann,
+            badge_x + badge_dims.width + layer_dims.width,
+            y,
+            TextParams {
+                font_size: sz - 2,
+                font: Some(font),
+                color: state_color,
+                ..Default::default()
+            },
+        );
+    }
 }
 
 fn format_duration(secs: f64) -> String {
@@ -134,114 +195,6 @@ fn format_duration(secs: f64) -> String {
     } else {
         format!("{m}:{sec:02}")
     }
-}
-
-// ─── Service status panel ─────────────────────────────────────────────────
-
-pub fn draw_service_panel(
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
-    connection: &ConnectionStatus,
-    enabled: bool,
-    dry_run: bool,
-    layer: &str,
-    trigger_total: u64,
-    font: &Font,
-    font_bold: &Font,
-) {
-    draw_rectangle(x, y, w, h, colors::LOG_BG);
-    let pad = 8.0;
-    let sz: u16 = 13;
-
-    draw_text_ex(
-        "WAYCLICK SERVICE",
-        x + pad,
-        y + 18.0,
-        TextParams {
-            font_size: 14,
-            font: Some(font_bold),
-            color: colors::TITLE,
-            ..Default::default()
-        },
-    );
-    draw_line(x + pad, y + 24.0, x + w - pad, y + 24.0, 1.0, colors::GRID);
-
-    let (conn_str, conn_color) = match connection {
-        ConnectionStatus::Connected => ("● CONNECTED", colors::SERVICE_ONLINE),
-        ConnectionStatus::Connecting => ("◌ CONNECTING", colors::MIDDLE_CLICK),
-        ConnectionStatus::Disconnected => ("○ OFFLINE", colors::SERVICE_OFFLINE),
-    };
-    draw_text_ex(
-        conn_str,
-        x + pad,
-        y + 42.0,
-        TextParams {
-            font_size: sz,
-            font: Some(font),
-            color: conn_color,
-            ..Default::default()
-        },
-    );
-
-    if matches!(connection, ConnectionStatus::Connected) {
-        let layer_text = format!("↪ {}", truncate_str(layer, 14));
-        let ld = measure_text(&layer_text, Some(font), sz - 1, 1.0);
-        draw_text_ex(
-            &layer_text,
-            x + w - ld.width - pad,
-            y + 42.0,
-            TextParams {
-                font_size: sz - 1,
-                font: Some(font),
-                color: colors::LAYER_BADGE,
-                ..Default::default()
-            },
-        );
-
-        let state_str = if dry_run {
-            "DRY-RUN"
-        } else if enabled {
-            "ENABLED"
-        } else {
-            "DISABLED"
-        };
-        let state_color = if dry_run {
-            colors::MIDDLE_CLICK
-        } else if enabled {
-            colors::TRIGGER_ACTIVE
-        } else {
-            colors::TRIGGER_DISABLED
-        };
-        draw_text_ex(
-            state_str,
-            x + pad,
-            y + 62.0,
-            TextParams {
-                font_size: sz - 1,
-                font: Some(font),
-                color: state_color,
-                ..Default::default()
-            },
-        );
-
-        let act_text = format!("{} activations", trigger_total);
-        let ad = measure_text(&act_text, Some(font), sz - 2, 1.0);
-        draw_text_ex(
-            &act_text,
-            x + w - ad.width - pad,
-            y + 62.0,
-            TextParams {
-                font_size: sz - 2,
-                font: Some(font),
-                color: colors::TEXT_DIM,
-                ..Default::default()
-            },
-        );
-    }
-
-    draw_line(x + pad, y + h - 1.0, x + w - pad, y + h - 1.0, 1.0, colors::GRID);
 }
 
 // ─── Trigger list panel ────────────────────────────────────────────────────
@@ -486,6 +439,8 @@ pub fn draw_status_bar(
     my: f32,
     perf: &PerfCounters,
     connection: &ConnectionStatus,
+    service_enabled: bool,
+    dry_run: bool,
     font: &Font,
 ) {
     let y = height - bar_h;
@@ -553,24 +508,28 @@ pub fn draw_status_bar(
         },
     );
 
-    // LIVE / OFFLINE badge at far right
-    let (live_text, live_color) = match connection {
-        ConnectionStatus::Connected => ("● LIVE", colors::SERVICE_ONLINE),
-        ConnectionStatus::Connecting => ("◌ SYNC", colors::MIDDLE_CLICK),
-        ConnectionStatus::Disconnected => ("○ OFFLINE", colors::SERVICE_OFFLINE),
-    };
-    let ld = measure_text(live_text, Some(font), sz, 1.0);
-    draw_text_ex(
-        live_text,
-        width - ld.width - 12.0,
-        ty,
-        TextParams {
-            font_size: sz,
-            font: Some(font),
-            color: live_color,
-            ..Default::default()
-        },
-    );
+    // Operational state at far right (only when connected)
+    if matches!(connection, ConnectionStatus::Connected) {
+        let (state_text, state_color) = if dry_run {
+            ("DRY-RUN", colors::MIDDLE_CLICK)
+        } else if service_enabled {
+            ("ENABLED", colors::TRIGGER_ACTIVE)
+        } else {
+            ("DISABLED", colors::TRIGGER_DISABLED)
+        };
+        let sd = measure_text(state_text, Some(font), sz, 1.0);
+        draw_text_ex(
+            state_text,
+            width - sd.width - 12.0,
+            ty,
+            TextParams {
+                font_size: sz,
+                font: Some(font),
+                color: state_color,
+                ..Default::default()
+            },
+        );
+    }
 }
 
 // ─── Glowing cursor ───────────────────────────────────────────────────────

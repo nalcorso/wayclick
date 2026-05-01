@@ -106,20 +106,25 @@ impl ParticleSystem {
         });
     }
 
-    /// Vertical fountain for scroll events.
-    pub fn spawn_fountain(&mut self, x: f32, y: f32, dir: f32, magnitude: usize) {
+    /// Directional fountain for scroll events.
+    /// `main_vx` / `main_vy` define the primary direction (normalised unit vector).
+    /// Spread is applied perpendicular to the direction.
+    pub fn spawn_fountain(&mut self, x: f32, y: f32, main_vx: f32, main_vy: f32, magnitude: usize) {
         let count = 8 * magnitude.max(1);
+        // Perpendicular direction (rotate 90°)
+        let perp_vx = -main_vy;
+        let perp_vy = main_vx;
         for _ in 0..count {
             if self.particles.len() >= MAX_PARTICLES {
                 break;
             }
+            let speed = rand::gen_range(100.0, 250.0);
             let spread = rand::gen_range(-40.0, 40.0);
-            let speed = rand::gen_range(100.0, 250.0) * dir;
             self.particles.push(Particle {
                 x: x + rand::gen_range(-6.0, 6.0),
-                y,
-                vx: spread,
-                vy: speed,
+                y: y + rand::gen_range(-6.0, 6.0),
+                vx: main_vx * speed + perp_vx * spread,
+                vy: main_vy * speed + perp_vy * spread,
                 color: colors::SCROLL,
                 size: rand::gen_range(2.0, 5.0),
                 size_end: 0.5,

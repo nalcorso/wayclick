@@ -109,9 +109,8 @@ async fn main() {
         let canvas_w = sw - right_panel_w;
         let canvas_h = sh - hud_h - status_h;
 
-        let service_panel_h = 80.0_f32;
-        let trigger_list_h = 220.0_f32;
-        let log_h = (canvas_h - service_panel_h - trigger_list_h).max(60.0);
+        let trigger_list_h = 300.0_f32;
+        let log_h = (canvas_h - trigger_list_h).max(60.0);
 
         // ============================================================
         // Pass 1: Render particles to off-screen target for bloom
@@ -175,25 +174,14 @@ async fn main() {
             &perf,
             now - start_time,
             &app_state.connection,
-            &font,
-            &font_bold,
-        );
-
-        ui::draw_service_panel(
-            panel_x,
-            hud_h,
-            right_panel_w,
-            service_panel_h,
-            &app_state.connection,
             app_state.service_enabled,
             app_state.dry_run,
             &app_state.layer,
-            perf.trigger_total,
             &font,
             &font_bold,
         );
 
-        let trigger_y = hud_h + service_panel_h;
+        let trigger_y = hud_h;
         if let Some(clicked_idx) = ui::draw_trigger_list(
             panel_x,
             trigger_y,
@@ -207,9 +195,7 @@ async fn main() {
             &font,
         ) {
             app_state.selected_trigger = Some(clicked_idx);
-            if let Some(entry) = app_state.triggers.get(clicked_idx) {
-                app_state.fire_trigger(&entry.info.id.clone());
-            }
+            app_state.toggle_trigger_enabled(clicked_idx);
         }
 
         let log_y = trigger_y + trigger_list_h;
@@ -223,6 +209,8 @@ async fn main() {
             my,
             &perf,
             &app_state.connection,
+            app_state.service_enabled,
+            app_state.dry_run,
             &font,
         );
 

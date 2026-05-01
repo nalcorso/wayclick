@@ -272,8 +272,16 @@ pub fn poll_input(
     if sx.abs() > 0.01 || sy.abs() > 0.01 {
         events.push(InputEvent::Scroll { x: sx, y: sy });
         perf.record_scroll();
-        let dir = if sy > 0.0 { -1.0 } else { 1.0 };
-        particles.spawn_fountain(mx, my, dir, sy.abs().max(sx.abs()) as usize);
+        let magnitude = sy.abs().max(sx.abs()) as usize;
+        // Particles follow the dominant scroll axis
+        let (main_vx, main_vy) = if sy.abs() >= sx.abs() {
+            // Vertical: scroll up (sy>0) → particles go up (vy<0)
+            (0.0, if sy > 0.0 { -1.0 } else { 1.0 })
+        } else {
+            // Horizontal: scroll right (sx>0) → particles go right
+            (if sx > 0.0 { 1.0 } else { -1.0 }, 0.0)
+        };
+        particles.spawn_fountain(mx, my, main_vx, main_vy, magnitude);
     }
 
     // Keyboard — only when IPC is not providing key events

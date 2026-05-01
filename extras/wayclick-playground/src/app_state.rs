@@ -140,10 +140,27 @@ impl AppState {
     }
 
     /// Send a FireTrigger command for the given trigger ID.
+    #[allow(dead_code)]
     pub fn fire_trigger(&self, id: &str) {
         let _ = self
             .ipc_cmd_tx
             .send(IpcCommand::FireTrigger(id.to_string()));
+    }
+
+    /// Toggle a trigger's `user_enabled` state via IPC.
+    /// Flips the flag optimistically in local state so the UI updates immediately.
+    pub fn toggle_trigger_enabled(&mut self, idx: usize) {
+        let Some(entry) = self.triggers.get_mut(idx) else {
+            return;
+        };
+        let id = entry.info.id.clone();
+        if entry.info.user_enabled {
+            entry.info.user_enabled = false;
+            let _ = self.ipc_cmd_tx.send(IpcCommand::DisableTrigger(id));
+        } else {
+            entry.info.user_enabled = true;
+            let _ = self.ipc_cmd_tx.send(IpcCommand::EnableTrigger(id));
+        }
     }
 
     /// Request a fresh trigger list from the daemon.

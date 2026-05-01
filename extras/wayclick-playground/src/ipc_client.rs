@@ -72,6 +72,8 @@ pub enum IpcMessage {
 #[allow(dead_code)]
 pub enum IpcCommand {
     FireTrigger(String),
+    EnableTrigger(String),
+    DisableTrigger(String),
     RefreshTriggers,
     Shutdown,
 }
@@ -377,6 +379,28 @@ fn run_connection_inner(
                         "id": null,
                         "method": "trigger",
                         "params": { "id": trigger_id, "press": true }
+                    });
+                    if !write_frame_nonblocking(&mut stream, &req) {
+                        return None;
+                    }
+                }
+                Ok(IpcCommand::EnableTrigger(trigger_id)) => {
+                    let req = json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "method": "enable_trigger",
+                        "params": { "id": trigger_id }
+                    });
+                    if !write_frame_nonblocking(&mut stream, &req) {
+                        return None;
+                    }
+                }
+                Ok(IpcCommand::DisableTrigger(trigger_id)) => {
+                    let req = json!({
+                        "jsonrpc": "2.0",
+                        "id": null,
+                        "method": "disable_trigger",
+                        "params": { "id": trigger_id }
                     });
                     if !write_frame_nonblocking(&mut stream, &req) {
                         return None;
