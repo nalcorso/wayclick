@@ -24,8 +24,9 @@ pub enum InputEvent {
     TriggerFired { id: String, active: bool },
     /// A service-level status message (connection, layer change, enable/disable).
     ServiceEvent(String),
-    /// A raw evdev key/button press sourced from the IPC InputReceived event.
-    RawIpcInput { code: u16 },
+    /// A raw evdev key/button event sourced from the IPC InputReceived event.
+    /// `value`: 1 = press, 0 = release.
+    RawIpcInput { code: u16, value: i32 },
 }
 
 #[derive(Clone, Debug)]
@@ -99,8 +100,9 @@ impl InputEvent {
                 }
             }
             InputEvent::ServiceEvent(msg) => msg.clone(),
-            InputEvent::RawIpcInput { code } => {
-                format!("{} ↓", evdev_name(*code))
+            InputEvent::RawIpcInput { code, value } => {
+                let arrow = if *value == 1 { "↓" } else { "↑" };
+                format!("{} {}", evdev_name(*code), arrow)
             }
         }
     }
@@ -119,14 +121,13 @@ impl InputEvent {
                 }
             }
             InputEvent::ServiceEvent(_) => colors::SERVICE_ONLINE,
-            InputEvent::RawIpcInput { code } => {
-                // Mouse side buttons (BTN_BACK=278 / BTN_FORWARD=277 etc.) use orange
-                if *code >= 272 && *code <= 279 {
-                    colors::SIDE_CLICK
-                } else {
-                    colors::KEYBOARD
-                }
-            }
+            InputEvent::RawIpcInput { code, .. } => match code {
+                272 => colors::LEFT_CLICK,
+                273 => colors::RIGHT_CLICK,
+                274 => colors::MIDDLE_CLICK,
+                275..=279 => colors::SIDE_CLICK,
+                _ => colors::KEYBOARD,
+            },
         }
     }
 }
@@ -259,11 +260,15 @@ pub fn poll_input(
     for btn in &all_buttons[..button_count] {
         let btn = *btn;
         if is_mouse_button_pressed(btn) {
-            events.push(InputEvent::Click(btn));
+            // When IPC is connected, it is the authoritative source for button events in
+            // the log; only spawn particles and update perf counters from macroquad here.
+            if !skip_keyboard_extra {
+                events.push(InputEvent::Click(btn));
+            }
             perf.record_click(btn);
             particles.spawn_burst(mx, my, btn_color(btn), 35);
         }
-        if is_mouse_button_released(btn) {
+        if is_mouse_button_released(btn) && !skip_keyboard_extra {
             events.push(InputEvent::Release(btn));
         }
     }

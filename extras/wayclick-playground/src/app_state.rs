@@ -5,6 +5,7 @@ use crate::events::{EventRing, InputEvent};
 use crate::ipc_client::{IpcCommand, IpcMessage, ServiceStatus, TriggerInfo};
 use crate::particles::ParticleSystem;
 use crate::perf::PerfCounters;
+use macroquad::prelude::MouseButton;
 use std::sync::mpsc::{Receiver, Sender};
 
 /// Whether the IPC connection to the wayclick daemon is available.
@@ -110,10 +111,22 @@ impl AppState {
                 }
 
                 IpcMessage::RawInput { code, value, .. } => {
-                    // Only show press events (value=1) to reduce log noise
+                    events.push(InputEvent::RawIpcInput { code, value });
+                    // Route perf: mouse buttons (272–279) → record_click, others → record_key
+                    // Only count presses (value=1), not releases, to keep totals accurate.
                     if value == 1 {
-                        events.push(InputEvent::RawIpcInput { code });
-                        perf.record_key();
+                        let btn = match code {
+                            272 => Some(MouseButton::Left),
+                            273 => Some(MouseButton::Right),
+                            274 => Some(MouseButton::Middle),
+                            275..=279 => Some(MouseButton::Unknown),
+                            _ => None,
+                        };
+                        if let Some(btn) = btn {
+                            perf.record_click(btn);
+                        } else {
+                            perf.record_key();
+                        }
                     }
                 }
 
