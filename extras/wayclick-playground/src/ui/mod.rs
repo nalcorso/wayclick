@@ -618,16 +618,21 @@ pub fn draw_event_log(
     let sz: u16 = 13;
     let line_h = 18.0;
     let pad = 8.0;
-    let content_y = y + SECTION_HEADER_H + 6.0;
+    // content_top is the top edge of the first row (below the header).
+    // Text baseline is placed at 78% down each row so glyphs stay within
+    // the row and never bleed up into the header area.
+    let content_top = y + SECTION_HEADER_H + 4.0;
+    let baseline_offset = line_h * 0.78;
 
-    let max_lines = ((h - SECTION_HEADER_H - 12.0) / line_h).max(0.0) as usize;
+    let max_lines = ((h - SECTION_HEADER_H - 4.0) / line_h).max(0.0) as usize;
     let start = events.len().saturating_sub(max_lines);
 
     for (i, te) in events.iter().skip(start).enumerate() {
-        let ly = content_y + i as f32 * line_h;
-        if ly + line_h > y + h {
+        let row_top = content_top + i as f32 * line_h;
+        if row_top + line_h > y + h {
             break;
         }
+        let ly = row_top + baseline_offset;
 
         let ts = format!("{:.1}s", te.time);
         draw_text_ex(
