@@ -48,3 +48,11 @@ run = "cargo bench --features bench-internals -- --sample-size 10 --warm-up-time
 [tasks.dev]
 description = "Quick development setup"
 run = "./scripts/dev.sh"
+
+[tasks.playground]
+description = "Run the wayclick-playground input visualiser"
+run = "cargo run -p wayclick-playground --release"
+
+[tasks.playground-dev]
+description = "Run the wayclick-playground (debug build, faster compile)"
+run = "cargo run -p wayclick-playground"
