@@ -413,11 +413,29 @@ pub fn draw_event_log(x: f32, y: f32, w: f32, h: f32, events: &EventRing, font: 
             },
         );
 
+        // Source indicator: ● = IPC (normal), ○ = local macroquad fallback
+        let (src_glyph, src_color) = if te.event.is_local_source() {
+            ("○", colors::SOURCE_LOCAL)
+        } else {
+            ("●", colors::SOURCE_IPC)
+        };
+        draw_text_ex(
+            src_glyph,
+            x + pad + 50.0,
+            ly,
+            TextParams {
+                font_size: sz,
+                font: Some(font),
+                color: src_color,
+                ..Default::default()
+            },
+        );
+
         let label = te.event.label();
         let color = te.event.color();
         draw_text_ex(
             &label,
-            x + pad + 60.0,
+            x + pad + 64.0,
             ly,
             TextParams {
                 font_size: sz,

@@ -433,6 +433,7 @@ fn handle_client(
 
     // Subscription state for this connection.
     let mut sub_stop_tx: Option<std::sync::mpsc::Sender<()>> = None;
+    let mut subscribed = false;
 
     loop {
         match decode_frame(&mut stream_read) {
@@ -448,6 +449,14 @@ fn handle_client(
                 );
                 if writer_tx.send(WriterMsg::Frame(response)).is_err() {
                     break;
+                }
+                // Once the client subscribes it becomes a passive event receiver — it won't
+                // send further requests unless triggered by explicit user action. Remove the
+                // read timeout so the connection isn't terminated after 30s of idle. EOF is
+                // still detected (read_exact returns UnexpectedEof → ConnectionClosed).
+                if !subscribed && sub_stop_tx.is_some() {
+                    subscribed = true;
+                    stream_read.set_read_timeout(None).unwrap_or_default();
                 }
             }
             Err(IpcError::ConnectionClosed) => break,

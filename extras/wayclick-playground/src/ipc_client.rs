@@ -327,6 +327,9 @@ fn run_connection_inner(
     // Request ID counter for in-flight requests during the event loop
     let mut next_id: u64 = 100;
     let mut pending_list_triggers: Option<u64> = None;
+    // Keepalive: send a ping every 20s to prevent server-side idle timeouts.
+    let mut last_ping = std::time::Instant::now();
+    const PING_INTERVAL: Duration = Duration::from_secs(20);
 
     loop {
         // ── Read available data ───────────────────────────────────────────
@@ -420,6 +423,14 @@ fn run_connection_inner(
                 Err(TryRecvError::Empty) => break,
                 Err(TryRecvError::Disconnected) => return Some(true),
             }
+        }
+
+        // ── Keepalive ping ─────────────────────────────────────────────────
+        if last_ping.elapsed() >= PING_INTERVAL {
+            let req = json!({"jsonrpc":"2.0","id":null,"method":"ping","params":null});
+            // Ignore write failure — a genuine socket error will surface on the next read.
+            write_frame_nonblocking(&mut stream, &req);
+            last_ping = std::time::Instant::now();
         }
 
         std::thread::sleep(Duration::from_millis(10));

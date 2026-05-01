@@ -30,3 +30,7 @@ pub const SERVICE_ONLINE: Color = Color::new(0.0, 1.0, 0.42, 1.0); // same as TR
 pub const SERVICE_OFFLINE: Color = Color::new(1.0, 0.45, 0.2, 1.0); // orange-red
 pub const TRIGGER_FIRE: Color = Color::new(1.0, 0.9, 0.2, 1.0); // gold burst
 pub const LAYER_BADGE: Color = Color::new(0.65, 0.3, 1.0, 1.0); // violet
+
+// Event log source indicators
+pub const SOURCE_IPC: Color = Color::new(0.0, 0.8, 1.0, 0.35); // dim cyan — normal IPC path
+pub const SOURCE_LOCAL: Color = Color::new(1.0, 0.7, 0.2, 0.85); // amber — macroquad fallback

@@ -68,6 +68,18 @@ impl EventRing {
 }
 
 impl InputEvent {
+    pub fn is_local_source(&self) -> bool {
+        matches!(
+            self,
+            InputEvent::Click(_)
+                | InputEvent::Release(_)
+                | InputEvent::Scroll { .. }
+                | InputEvent::KeyDown(_)
+                | InputEvent::KeyUp(_)
+                | InputEvent::Move { .. }
+        )
+    }
+
     pub fn label(&self) -> String {
         match self {
             InputEvent::Click(btn) => format!("{} ↓", btn_name(*btn)),
