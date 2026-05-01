@@ -21,6 +21,9 @@ pub enum EventType {
     LayerChanged,
     EnabledChanged,
     ConfigReloaded,
+    /// Raw key/button press or release observed by the evdev monitor.
+    /// Only value=1 (press) and value=0 (release) are published; repeats (value=2) are filtered.
+    InputReceived,
 }
 
 impl EventType {
@@ -31,6 +34,7 @@ impl EventType {
             "layer_changed" => Some(Self::LayerChanged),
             "enabled_changed" => Some(Self::EnabledChanged),
             "config_reloaded" => Some(Self::ConfigReloaded),
+            "input_received" => Some(Self::InputReceived),
             _ => None,
         }
     }
@@ -60,6 +64,14 @@ pub enum Event {
     ConfigReloaded {
         timestamp_ms: u64,
     },
+    /// Raw key or button press/release from the evdev monitor.
+    /// `value` is 1 for press, 0 for release (repeats are never published).
+    InputReceived {
+        code: u16,
+        value: i32,
+        device_name: String,
+        timestamp_ms: u64,
+    },
 }
 
 impl Event {
@@ -70,6 +82,7 @@ impl Event {
             Event::LayerChanged { .. } => EventType::LayerChanged,
             Event::EnabledChanged { .. } => EventType::EnabledChanged,
             Event::ConfigReloaded { .. } => EventType::ConfigReloaded,
+            Event::InputReceived { .. } => EventType::InputReceived,
         }
     }
 
@@ -104,6 +117,15 @@ impl Event {
 
     pub fn config_reloaded() -> Self {
         Self::ConfigReloaded {
+            timestamp_ms: now_ms(),
+        }
+    }
+
+    pub fn input_received(code: u16, value: i32, device_name: String) -> Self {
+        Self::InputReceived {
+            code,
+            value,
+            device_name,
             timestamp_ms: now_ms(),
         }
     }

@@ -61,6 +61,32 @@ impl ParticleSystem {
         }
     }
 
+    /// Larger burst for trigger activation — wider spread, longer lifetime, gold colour.
+    pub fn spawn_trigger_burst(&mut self, x: f32, y: f32) {
+        let color = colors::TRIGGER_FIRE;
+        let count = 50;
+        for _ in 0..count {
+            if self.particles.len() >= MAX_PARTICLES {
+                break;
+            }
+            let angle = rand::gen_range(0.0_f32, std::f32::consts::TAU);
+            let speed = rand::gen_range(80.0, 420.0);
+            let size = rand::gen_range(3.0, 9.0);
+            self.particles.push(Particle {
+                x,
+                y,
+                vx: angle.cos() * speed,
+                vy: angle.sin() * speed,
+                color,
+                size,
+                size_end: 0.5,
+                lifetime: rand::gen_range(0.5, 1.2),
+                age: 0.0,
+                glow: true,
+            });
+        }
+    }
+
     /// Small trail particle at cursor position.
     pub fn spawn_trail(&mut self, x: f32, y: f32) {
         if self.particles.len() >= MAX_PARTICLES {

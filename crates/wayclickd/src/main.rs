@@ -182,6 +182,7 @@ fn main() {
 
     // Start EvdevMonitor with forwarding backend
     let mut evdev_monitor = EvdevMonitor::new(engine.clone(), logger.clone());
+    evdev_monitor.set_event_bus(event_bus.clone());
     evdev_monitor.set_backend(backend);
     evdev_monitor.configure(config.device_bindings.clone());
     evdev_monitor.start();

@@ -276,7 +276,7 @@ including submaps and per-trigger bindings.
 | `wayclickctl` | CLI — control the running daemon |
 | `wayclick-tui` | TUI — real-time dashboard with trigger state and logs |
 | `wayclick-evdev-dump` | Diagnostic — list devices, monitor events, identify buttons |
-| `wayclick-input-viz` | Visual testing — GPU-accelerated input visualizer |
+| `wayclick-playground` | Visual testing — GPU-accelerated input visualizer (see [`extras/wayclick-playground/`](extras/wayclick-playground/)) |
 
 ---
 

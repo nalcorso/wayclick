@@ -1556,10 +1556,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "wayclick-input-viz"
+name = "wayclick-playground"
 version = "0.1.0"
 dependencies = [
  "macroquad",
+ "serde_json",
 ]
 
 [[package]]

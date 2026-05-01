@@ -1,18 +1,22 @@
 use macroquad::prelude::*;
 
+mod app_state;
 mod colors;
 mod events;
+mod ipc_client;
 mod particles;
 mod perf;
 mod ui;
 
+use app_state::{AppState, ConnectionStatus};
 use events::EventRing;
+use ipc_client::spawn_ipc_thread;
 use particles::ParticleSystem;
 use perf::PerfCounters;
 
 fn window_conf() -> Conf {
     Conf {
-        window_title: "wayclick input-viz".to_string(),
+        window_title: "wayclick playground".to_string(),
         window_width: 1280,
         window_height: 800,
         window_resizable: true,
@@ -38,6 +42,10 @@ async fn main() {
     let mut prev_mouse = mouse_position();
     let start_time = get_time();
 
+    // Spawn IPC background thread and initialise application state
+    let (ipc_rx, ipc_cmd_tx) = spawn_ipc_thread();
+    let mut app_state = AppState::new(ipc_rx, ipc_cmd_tx);
+
     // Render target for bloom pass
     let mut bloom_target = render_target(screen_width() as u32, screen_height() as u32);
     bloom_target.texture.set_filter(FilterMode::Linear);
@@ -59,7 +67,14 @@ async fn main() {
             bloom_target.texture.set_filter(FilterMode::Linear);
         }
 
+        // --- IPC drain (must happen before input polling) ---
+        app_state.drain_ipc(mx, my, &mut events, &mut perf, &mut particles);
+
+        let ipc_connected = matches!(app_state.connection, ConnectionStatus::Connected);
+
         // --- Input polling ---
+        // When IPC is connected, skip macroquad keyboard + Mouse::Unknown;
+        // those events arrive via InputReceived IPC events instead.
         events::poll_input(
             &mut events,
             &mut perf,
@@ -67,11 +82,36 @@ async fn main() {
             mx,
             my,
             &mut prev_mouse,
+            ipc_connected,
         );
         perf.tick(dt);
 
+        // --- Trigger list scroll (when cursor is in right panel) ---
+        let right_panel_w = 340.0_f32;
+        if mx >= sw - right_panel_w {
+            let (_, sy) = mouse_wheel();
+            if sy > 0.5 && app_state.trigger_scroll > 0 {
+                app_state.trigger_scroll -= 1;
+            } else if sy < -0.5 {
+                let max_scroll = app_state.triggers.len().saturating_sub(1);
+                if app_state.trigger_scroll < max_scroll {
+                    app_state.trigger_scroll += 1;
+                }
+            }
+        }
+
         // --- Particle update ---
         particles.update(dt);
+
+        // Layout constants
+        let hud_h = 44.0_f32;
+        let status_h = 32.0_f32;
+        let canvas_w = sw - right_panel_w;
+        let canvas_h = sh - hud_h - status_h;
+
+        let service_panel_h = 80.0_f32;
+        let trigger_list_h = 220.0_f32;
+        let log_h = (canvas_h - service_panel_h - trigger_list_h).max(60.0);
 
         // ============================================================
         // Pass 1: Render particles to off-screen target for bloom
@@ -100,13 +140,6 @@ async fn main() {
             gl_use_default_material();
         }
 
-        // Canvas area (left of log panel)
-        let log_width = 300.0_f32;
-        let hud_h = 44.0_f32;
-        let status_h = 32.0_f32;
-        let canvas_w = sw - log_width;
-        let canvas_h = sh - hud_h - status_h;
-
         // Draw particles (with bloom composite)
         if let Some(ref mat) = bloom_material {
             gl_use_material(mat);
@@ -122,7 +155,6 @@ async fn main() {
             );
             gl_use_default_material();
         }
-        // Also draw raw particles for core brightness
         particles.draw();
 
         // Glowing cursor
@@ -132,23 +164,71 @@ async fn main() {
         ui::draw_held_keys(canvas_w, canvas_h, hud_h, &font);
 
         // Floating key labels
-        ui::draw_key_labels(&mut particles, &font);
+        ui::draw_key_labels(&mut particles, canvas_w, &font);
 
         // --- UI Panels ---
-        ui::draw_hud(sw, hud_h, &perf, now - start_time, &font, &font_bold);
-        ui::draw_event_log(sw - log_width, hud_h, log_width, canvas_h, &events, &font);
-        ui::draw_status_bar(sw, sh, status_h, mx, my, &perf, &font);
+        let panel_x = sw - right_panel_w;
+
+        ui::draw_hud(
+            sw,
+            hud_h,
+            &perf,
+            now - start_time,
+            &app_state.connection,
+            &font,
+            &font_bold,
+        );
+
+        ui::draw_service_panel(
+            panel_x,
+            hud_h,
+            right_panel_w,
+            service_panel_h,
+            &app_state.connection,
+            app_state.service_enabled,
+            app_state.dry_run,
+            &app_state.layer,
+            perf.trigger_total,
+            &font,
+            &font_bold,
+        );
+
+        let trigger_y = hud_h + service_panel_h;
+        if let Some(clicked_idx) = ui::draw_trigger_list(
+            panel_x,
+            trigger_y,
+            right_panel_w,
+            trigger_list_h,
+            &app_state.triggers,
+            app_state.trigger_scroll,
+            app_state.selected_trigger,
+            mx,
+            my,
+            &font,
+        ) {
+            app_state.selected_trigger = Some(clicked_idx);
+            if let Some(entry) = app_state.triggers.get(clicked_idx) {
+                app_state.fire_trigger(&entry.info.id.clone());
+            }
+        }
+
+        let log_y = trigger_y + trigger_list_h;
+        ui::draw_event_log(panel_x, log_y, right_panel_w, log_h, &events, &font);
+
+        ui::draw_status_bar(
+            sw,
+            sh,
+            status_h,
+            mx,
+            my,
+            &perf,
+            &app_state.connection,
+            &font,
+        );
 
         // Panel separator lines
         draw_line(0.0, hud_h, sw, hud_h, 1.0, colors::GRID);
-        draw_line(
-            sw - log_width,
-            hud_h,
-            sw - log_width,
-            sh - status_h,
-            1.0,
-            colors::GRID,
-        );
+        draw_line(panel_x, hud_h, panel_x, sh - status_h, 1.0, colors::GRID);
         draw_line(0.0, sh - status_h, sw, sh - status_h, 1.0, colors::GRID);
 
         next_frame().await;

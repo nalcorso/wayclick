@@ -11,6 +11,7 @@ pub struct PerfCounters {
     pub extra_total: u64,
     pub scroll_total: u64,
     pub key_total: u64,
+    pub trigger_total: u64,
 
     // Rolling window timestamps for rate calculation
     click_times: VecDeque<f32>,
@@ -39,6 +40,7 @@ impl PerfCounters {
             extra_total: 0,
             scroll_total: 0,
             key_total: 0,
+            trigger_total: 0,
             click_times: VecDeque::new(),
             scroll_times: VecDeque::new(),
             event_times: VecDeque::new(),
@@ -71,6 +73,11 @@ impl PerfCounters {
 
     pub fn record_key(&mut self) {
         self.key_total += 1;
+        self.event_times.push_back(self.elapsed);
+    }
+
+    pub fn record_trigger(&mut self) {
+        self.trigger_total += 1;
         self.event_times.push_back(self.elapsed);
     }
 

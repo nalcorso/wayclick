@@ -2,6 +2,7 @@
 
 use crate::config::{Binding, DeviceBinding, TriggerEdge};
 use crate::engine::{with_engine_events, Engine};
+use crate::event_bus::{Event, EventBus};
 use crate::evdev_source::{
     self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, SYN_DROPPED,
     SYN_REPORT,
@@ -19,6 +20,7 @@ use std::time::Duration;
 pub struct EvdevMonitor {
     engine: Arc<Mutex<Engine>>,
     logger: Arc<Logger>,
+    event_bus: Option<Arc<EventBus>>,
     backend: Option<Arc<dyn InputBackend>>,
     config_bindings: Vec<DeviceBinding>,
     running: Arc<AtomicBool>,
@@ -32,6 +34,7 @@ impl EvdevMonitor {
         Self {
             engine,
             logger,
+            event_bus: None,
             backend: None,
             config_bindings: Vec::new(),
             running: Arc::new(AtomicBool::new(false)),
@@ -44,6 +47,11 @@ impl EvdevMonitor {
     /// Set the backend used for event forwarding in exclusive mode.
     pub fn set_backend(&mut self, backend: Arc<dyn InputBackend>) {
         self.backend = Some(backend);
+    }
+
+    /// Set the event bus for publishing raw InputReceived events.
+    pub fn set_event_bus(&mut self, event_bus: Arc<EventBus>) {
+        self.event_bus = Some(event_bus);
     }
 
     pub fn configure(&mut self, bindings: Vec<DeviceBinding>) {
@@ -73,6 +81,7 @@ impl EvdevMonitor {
         let bindings = self.config_bindings.clone();
         let tracked = self.tracked_devices.clone();
         let backend = self.backend.clone();
+        let event_bus = self.event_bus.clone();
 
         self.scan_thread = Some(thread::spawn(move || {
             while running.load(Ordering::SeqCst) {
@@ -104,6 +113,7 @@ impl EvdevMonitor {
                                 running: running.clone(),
                                 tracked: tracked.clone(),
                                 backend: backend.clone(),
+                                event_bus: event_bus.clone(),
                             });
                             break;
                         }
@@ -143,6 +153,7 @@ impl EvdevMonitor {
                         running: self.running.clone(),
                         tracked: self.tracked_devices.clone(),
                         backend: self.backend.clone(),
+                        event_bus: self.event_bus.clone(),
                     });
                     self.device_threads.push(handle);
                     break; // Only match first binding per device
@@ -177,6 +188,7 @@ struct DeviceThreadParams {
     running: Arc<AtomicBool>,
     tracked: Arc<Mutex<HashMap<PathBuf, ()>>>,
     backend: Option<Arc<dyn InputBackend>>,
+    event_bus: Option<Arc<EventBus>>,
 }
 
 fn spawn_device_thread(params: DeviceThreadParams) -> JoinHandle<()> {
@@ -189,6 +201,7 @@ fn spawn_device_thread(params: DeviceThreadParams) -> JoinHandle<()> {
         running,
         tracked,
         backend,
+        event_bus,
     } = params;
     thread::spawn(move || {
         let mut source = match EvdevSource::open(&path, exclusive) {
@@ -200,14 +213,15 @@ fn spawn_device_thread(params: DeviceThreadParams) -> JoinHandle<()> {
             }
         };
 
+        let device_name = source.device_info().name.clone();
         logger.debug(format!(
             "Monitoring device '{}' at {:?}",
-            source.device_info().name,
-            path
+            device_name, path
         ));
 
         let forward_backend = if exclusive { backend } else { None };
-        let mut processor = DeviceProcessor::new(binding, engine, logger.clone(), forward_backend);
+        let mut processor =
+            DeviceProcessor::new(binding, engine, logger.clone(), forward_backend, device_name, event_bus);
 
         while running.load(Ordering::SeqCst) {
             match source.poll_events(Duration::from_millis(100)) {
@@ -247,6 +261,10 @@ pub(crate) struct DeviceProcessor {
     /// Active press-edge claims: binding index → was_swallowed.
     /// Tracks which bindings have fired on press and are awaiting their release dispatch.
     active_claims: HashMap<usize, bool>,
+    /// Physical device name for InputReceived events.
+    device_name: String,
+    /// Optional event bus for publishing raw input events.
+    event_bus: Option<Arc<EventBus>>,
 }
 
 impl DeviceProcessor {
@@ -255,6 +273,8 @@ impl DeviceProcessor {
         engine: Arc<Mutex<Engine>>,
         logger: Arc<Logger>,
         forward_backend: Option<Arc<dyn InputBackend>>,
+        device_name: String,
+        event_bus: Option<Arc<EventBus>>,
     ) -> Self {
         Self {
             binding,
@@ -264,6 +284,8 @@ impl DeviceProcessor {
             pending_frame: Vec::new(),
             held_codes: HashSet::new(),
             active_claims: HashMap::new(),
+            device_name,
+            event_bus,
         }
     }
 
@@ -305,6 +327,18 @@ impl DeviceProcessor {
                         _ => {}
                     }
                 } else {
+                    // Publish physical key/button press and release to event bus (not repeats).
+                    // This represents physical input observed by wayclick, regardless of whether
+                    // the event will later be swallowed or forwarded.
+                    if event.event_type == EV_KEY && (event.value == 0 || event.value == 1) {
+                        if let Some(bus) = &self.event_bus {
+                            bus.publish(&Event::input_received(
+                                event.code,
+                                event.value,
+                                self.device_name.clone(),
+                            ));
+                        }
+                    }
                     self.pending_frame.push(event.clone());
                 }
             }
@@ -313,6 +347,16 @@ impl DeviceProcessor {
             // Only single-code bindings are matched (chord detection requires frame buffering).
             for event in events {
                 if event.event_type == EV_KEY {
+                    // Publish physical key/button press and release to event bus (not repeats).
+                    if event.value == 0 || event.value == 1 {
+                        if let Some(bus) = &self.event_bus {
+                            bus.publish(&Event::input_received(
+                                event.code,
+                                event.value,
+                                self.device_name.clone(),
+                            ));
+                        }
+                    }
                     for binding_item in &self.binding.bindings {
                         if let Binding::Button(ref bb) = binding_item {
                             if bb.codes.len() != 1 || bb.codes[0] != event.code {
@@ -774,7 +818,7 @@ mod tests {
         logger: Arc<Logger>,
         forward_backend: Option<Arc<dyn InputBackend>>,
     ) -> DeviceProcessor {
-        DeviceProcessor::new(binding, engine, logger, forward_backend)
+        DeviceProcessor::new(binding, engine, logger, forward_backend, "test-device".to_string(), None)
     }
 
     #[test]

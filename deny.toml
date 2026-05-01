@@ -9,7 +9,7 @@ ignore = [
     # paste is unmaintained but only used transitively by ratatui;
     # will be resolved when ratatui updates its dependency tree.
     "RUSTSEC-2024-0436",
-    # macroquad soundness issues; used only in the standalone input-viz
+    # macroquad soundness issues; used only in the standalone wayclick-playground (extras/)
     # testing tool, not in the daemon. No fix available upstream.
     "RUSTSEC-2025-0035",
 ]

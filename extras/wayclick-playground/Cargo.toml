@@ -1,5 +1,5 @@
 [package]
-name = "wayclick-input-viz"
+name = "wayclick-playground"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,8 +10,9 @@ description = "Visual input testing tool for wayclick — particle effects, even
 include = ["src/**/*", "assets/**/*"]
 
 [[bin]]
-name = "wayclick-input-viz"
+name = "wayclick-playground"
 path = "src/main.rs"
 
 [dependencies]
 macroquad = "0.4"
+serde_json = "1"

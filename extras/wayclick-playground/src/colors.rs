@@ -21,3 +21,12 @@ pub const TEXT: Color = Color::new(0.9, 0.92, 0.96, 1.0);
 pub const TEXT_DIM: Color = Color::new(0.45, 0.48, 0.55, 1.0);
 pub const ACCENT: Color = Color::new(0.0, 0.8, 1.0, 1.0); // bright cyan
 pub const TITLE: Color = Color::new(0.4, 0.85, 1.0, 1.0);
+
+// Service / trigger status
+pub const TRIGGER_ACTIVE: Color = Color::new(0.0, 1.0, 0.42, 1.0); // #00ff6b bright green
+pub const TRIGGER_IDLE: Color = Color::new(0.35, 0.42, 0.55, 1.0); // dim slate-blue
+pub const TRIGGER_DISABLED: Color = Color::new(0.8, 0.25, 0.25, 1.0); // dim red
+pub const SERVICE_ONLINE: Color = Color::new(0.0, 1.0, 0.42, 1.0); // same as TRIGGER_ACTIVE
+pub const SERVICE_OFFLINE: Color = Color::new(1.0, 0.45, 0.2, 1.0); // orange-red
+pub const TRIGGER_FIRE: Color = Color::new(1.0, 0.9, 0.2, 1.0); // gold burst
+pub const LAYER_BADGE: Color = Color::new(0.65, 0.3, 1.0, 1.0); // violet
