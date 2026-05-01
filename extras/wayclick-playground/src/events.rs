@@ -13,6 +13,13 @@ pub enum InputEvent {
         x: f32,
         y: f32,
     },
+    /// A scroll event sourced from the wayclick daemon (EV_REL REL_WHEEL / REL_HWHEEL).
+    /// delta_y > 0 = scroll up, delta_y < 0 = scroll down.
+    /// delta_x > 0 = scroll right, delta_x < 0 = scroll left.
+    IpcScroll {
+        delta_x: i32,
+        delta_y: i32,
+    },
     KeyDown(KeyCode),
     KeyUp(KeyCode),
     #[allow(dead_code)]
@@ -92,22 +99,9 @@ impl InputEvent {
         match self {
             InputEvent::Click(btn) => format!("{} ↓", btn_name(*btn)),
             InputEvent::Release(btn) => format!("{} ↑", btn_name(*btn)),
-            InputEvent::Scroll { x, y } => {
-                let dir = if *y > 0.0 {
-                    "UP"
-                } else if *y < 0.0 {
-                    "DOWN"
-                } else if *x > 0.0 {
-                    "RIGHT"
-                } else {
-                    "LEFT"
-                };
-                let mag = y.abs().max(x.abs());
-                if mag > 1.0 {
-                    format!("SCROLL {} ×{}", dir, mag as i32)
-                } else {
-                    format!("SCROLL {}", dir)
-                }
+            InputEvent::Scroll { x, y } => scroll_label(*x, *y),
+            InputEvent::IpcScroll { delta_x, delta_y } => {
+                scroll_label(*delta_x as f32, *delta_y as f32)
             }
             InputEvent::KeyDown(k) => format!("{:?} ↓", k),
             InputEvent::KeyUp(k) => format!("{:?} ↑", k),
@@ -144,7 +138,7 @@ impl InputEvent {
     pub fn color(&self) -> Color {
         match self {
             InputEvent::Click(btn) | InputEvent::Release(btn) => btn_color(*btn),
-            InputEvent::Scroll { .. } => colors::SCROLL,
+            InputEvent::Scroll { .. } | InputEvent::IpcScroll { .. } => colors::SCROLL,
             InputEvent::KeyDown(_) | InputEvent::KeyUp(_) => colors::KEYBOARD,
             InputEvent::Move { .. } => colors::TRAIL,
             InputEvent::TriggerFired { active, .. } => {
@@ -164,6 +158,24 @@ impl InputEvent {
             },
             InputEvent::FocusChanged { .. } => colors::FOCUS_CHANGE,
         }
+    }
+}
+
+pub fn scroll_label(x: f32, y: f32) -> String {
+    let dir = if y > 0.0 {
+        "UP"
+    } else if y < 0.0 {
+        "DOWN"
+    } else if x > 0.0 {
+        "RIGHT"
+    } else {
+        "LEFT"
+    };
+    let mag = y.abs().max(x.abs());
+    if mag > 1.0 {
+        format!("SCROLL {} ×{}", dir, mag as i32)
+    } else {
+        format!("SCROLL {}", dir)
     }
 }
 
@@ -273,8 +285,10 @@ pub fn evdev_name(code: u16) -> &'static str {
 }
 
 /// Poll macroquad input each frame and record events.
-/// `skip_keyboard_extra`: when true (IPC connected), skip keyboard keys and
-/// Mouse::Unknown — those are sourced from IPC instead.
+/// `skip_keyboard_extra`: when true (IPC connected), suppress local mouse button/scroll log
+/// entries and Mouse::Unknown — those are sourced authoritatively from IPC instead.
+/// Keyboard events are always logged locally (○) regardless of IPC state; when IPC is also
+/// providing keyboard events (●), both appear and the source symbol distinguishes them.
 pub fn poll_input(
     events: &mut EventRing,
     perf: &mut PerfCounters,
@@ -308,32 +322,33 @@ pub fn poll_input(
         }
     }
 
-    let (sx, sy) = mouse_wheel();
-    if sx.abs() > 0.01 || sy.abs() > 0.01 {
-        events.push(InputEvent::Scroll { x: sx, y: sy });
-        perf.record_scroll();
-        let magnitude = sy.abs().max(sx.abs()) as usize;
-        // Particles follow the dominant scroll axis
-        let (main_vx, main_vy) = if sy.abs() >= sx.abs() {
-            // Vertical: scroll up (sy>0) → particles go up (vy<0)
-            (0.0, if sy > 0.0 { -1.0 } else { 1.0 })
-        } else {
-            // Horizontal: scroll right (sx>0) → particles go right
-            (if sx > 0.0 { 1.0 } else { -1.0 }, 0.0)
-        };
-        particles.spawn_fountain(mx, my, main_vx, main_vy, magnitude);
+    // Local scroll: suppressed when IPC is connected (IpcScroll from daemon takes over).
+    // Particles and perf are handled in app_state when IpcScroll arrives.
+    if !skip_keyboard_extra {
+        let (sx, sy) = mouse_wheel();
+        if sx.abs() > 0.01 || sy.abs() > 0.01 {
+            events.push(InputEvent::Scroll { x: sx, y: sy });
+            perf.record_scroll();
+            let magnitude = sy.abs().max(sx.abs()) as usize;
+            let (main_vx, main_vy) = if sy.abs() >= sx.abs() {
+                (0.0, if sy > 0.0 { -1.0 } else { 1.0 })
+            } else {
+                (if sx > 0.0 { 1.0 } else { -1.0 }, 0.0)
+            };
+            particles.spawn_fountain(mx, my, main_vx, main_vy, magnitude);
+        }
     }
 
-    // Keyboard — only when IPC is not providing key events
-    if !skip_keyboard_extra {
-        for key in get_keys_pressed() {
-            events.push(InputEvent::KeyDown(key));
-            perf.record_key();
-            particles.spawn_key_label(format!("{:?}", key));
-        }
-        for key in get_keys_released() {
-            events.push(InputEvent::KeyUp(key));
-        }
+    // Keyboard: always log locally so keys appear in the event log even when wayclick is not
+    // monitoring a keyboard device. When the keyboard IS bound in wayclick, IPC RawIpcInput
+    // events also appear (●), and the source symbol differentiates the two.
+    for key in get_keys_pressed() {
+        events.push(InputEvent::KeyDown(key));
+        perf.record_key();
+        particles.spawn_key_label(format!("{:?}", key));
+    }
+    for key in get_keys_released() {
+        events.push(InputEvent::KeyUp(key));
     }
 
     // Movement trail (independent of IPC mode)

@@ -79,6 +79,10 @@ pub enum IpcMessage {
     ConfigReloaded,
     TriggerListUpdated(Vec<TriggerInfo>),
     FocusChanged(Option<FocusedWindow>),
+    ScrollReceived {
+        delta_x: i32,
+        delta_y: i32,
+    },
 }
 
 /// Commands sent from the main (macroquad) thread to the IPC background thread.
@@ -300,6 +304,11 @@ fn frame_to_message(val: &Value) -> Option<IpcMessage> {
                 value,
                 device_name,
             })
+        }
+        "scroll_received" => {
+            let delta_x = params.get("delta_x")?.as_i64()? as i32;
+            let delta_y = params.get("delta_y")?.as_i64()? as i32;
+            Some(IpcMessage::ScrollReceived { delta_x, delta_y })
         }
         "focus_changed" => {
             let window = parse_focused_window(params.get("window"));

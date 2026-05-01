@@ -187,6 +187,18 @@ impl AppState {
                         });
                     }
                 }
+
+                IpcMessage::ScrollReceived { delta_x, delta_y } => {
+                    events.push(InputEvent::IpcScroll { delta_x, delta_y });
+                    perf.record_scroll();
+                    let mag = (delta_x.abs().max(delta_y.abs()) as usize).max(1);
+                    let (main_vx, main_vy) = if delta_y.abs() >= delta_x.abs() {
+                        (0.0, if delta_y > 0 { -1.0 } else { 1.0 })
+                    } else {
+                        (if delta_x > 0 { 1.0 } else { -1.0 }, 0.0)
+                    };
+                    particles.spawn_fountain(mx, my, main_vx, main_vy, mag);
+                }
             }
         }
     }

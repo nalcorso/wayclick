@@ -25,6 +25,9 @@ pub enum EventType {
     /// Raw key/button press or release observed by the evdev monitor.
     /// Only value=1 (press) and value=0 (release) are published; repeats (value=2) are filtered.
     InputReceived,
+    /// Mouse wheel or horizontal scroll observed by the evdev monitor.
+    /// delta_y > 0 = scroll up; delta_x > 0 = scroll right.
+    ScrollReceived,
     /// The focused window changed (new process/app gained focus, or window title updated).
     FocusChanged,
 }
@@ -38,6 +41,7 @@ impl EventType {
             "enabled_changed" => Some(Self::EnabledChanged),
             "config_reloaded" => Some(Self::ConfigReloaded),
             "input_received" => Some(Self::InputReceived),
+            "scroll_received" => Some(Self::ScrollReceived),
             "focus_changed" => Some(Self::FocusChanged),
             _ => None,
         }
@@ -76,6 +80,15 @@ pub enum Event {
         device_name: String,
         timestamp_ms: u64,
     },
+    /// Mouse wheel or horizontal scroll from the evdev monitor.
+    /// `delta_y` > 0 = scroll up, < 0 = scroll down (REL_WHEEL).
+    /// `delta_x` > 0 = scroll right, < 0 = scroll left (REL_HWHEEL).
+    ScrollReceived {
+        delta_x: i32,
+        delta_y: i32,
+        device_name: String,
+        timestamp_ms: u64,
+    },
     /// The focused window changed.
     ///
     /// `window` is `None` when focus moves to the desktop (no window focused).
@@ -98,6 +111,7 @@ impl Event {
             Event::EnabledChanged { .. } => EventType::EnabledChanged,
             Event::ConfigReloaded { .. } => EventType::ConfigReloaded,
             Event::InputReceived { .. } => EventType::InputReceived,
+            Event::ScrollReceived { .. } => EventType::ScrollReceived,
             Event::FocusChanged { .. } => EventType::FocusChanged,
         }
     }
@@ -141,6 +155,15 @@ impl Event {
         Self::InputReceived {
             code,
             value,
+            device_name,
+            timestamp_ms: now_ms(),
+        }
+    }
+
+    pub fn scroll_received(delta_x: i32, delta_y: i32, device_name: String) -> Self {
+        Self::ScrollReceived {
+            delta_x,
+            delta_y,
             device_name,
             timestamp_ms: now_ms(),
         }
@@ -284,6 +307,28 @@ mod tests {
     fn test_event_type_from_str() {
         assert_eq!(EventType::from_str("trigger_activated"), Some(EventType::TriggerActivated));
         assert_eq!(EventType::from_str("config_reloaded"), Some(EventType::ConfigReloaded));
+        assert_eq!(EventType::from_str("scroll_received"), Some(EventType::ScrollReceived));
         assert_eq!(EventType::from_str("unknown"), None);
+    }
+
+    #[test]
+    fn test_scroll_received_serialization() {
+        let event = Event::scroll_received(1, -3, "test-mouse".to_string());
+        let val = serde_json::to_value(&event).unwrap();
+        assert_eq!(val["type"], "scroll_received");
+        assert_eq!(val["delta_x"], 1);
+        assert_eq!(val["delta_y"], -3);
+        assert_eq!(val["device_name"], "test-mouse");
+    }
+
+    #[test]
+    fn test_scroll_received_published_and_received() {
+        let bus = EventBus::new();
+        let rx = bus.subscribe(Some(vec![EventType::ScrollReceived]));
+        bus.publish(&Event::scroll_received(0, 1, "mouse".to_string()));
+        let event = rx.recv_timeout(std::time::Duration::from_millis(100)).unwrap();
+        assert!(
+            matches!(event, Event::ScrollReceived { delta_x: 0, delta_y: 1, .. })
+        );
     }
 }

@@ -4,8 +4,8 @@ use crate::config::{Binding, DeviceBinding, TriggerEdge};
 use crate::engine::{with_engine_events, Engine};
 use crate::event_bus::{Event, EventBus};
 use crate::evdev_source::{
-    self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, SYN_DROPPED,
-    SYN_REPORT,
+    self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, REL_HWHEEL,
+    REL_WHEEL, SYN_DROPPED, SYN_REPORT,
 };
 use crate::input_backend::InputBackend;
 use crate::logger::Logger;
@@ -339,6 +339,23 @@ impl DeviceProcessor {
                             ));
                         }
                     }
+                    // Publish mouse wheel events to the event bus.
+                    if event.event_type == EV_REL
+                        && (event.code == REL_WHEEL || event.code == REL_HWHEEL)
+                    {
+                        if let Some(bus) = &self.event_bus {
+                            let (dx, dy) = if event.code == REL_WHEEL {
+                                (0, event.value)
+                            } else {
+                                (event.value, 0)
+                            };
+                            bus.publish(&Event::scroll_received(
+                                dx,
+                                dy,
+                                self.device_name.clone(),
+                            ));
+                        }
+                    }
                     self.pending_frame.push(event.clone());
                 }
             }
@@ -357,6 +374,20 @@ impl DeviceProcessor {
                             ));
                         }
                     }
+                } else if event.event_type == EV_REL
+                    && (event.code == REL_WHEEL || event.code == REL_HWHEEL)
+                {
+                    // Publish mouse wheel events to the event bus.
+                    if let Some(bus) = &self.event_bus {
+                        let (dx, dy) = if event.code == REL_WHEEL {
+                            (0, event.value)
+                        } else {
+                            (event.value, 0)
+                        };
+                        bus.publish(&Event::scroll_received(dx, dy, self.device_name.clone()));
+                    }
+                }
+                if event.event_type == EV_KEY {
                     for binding_item in &self.binding.bindings {
                         if let Binding::Button(ref bb) = binding_item {
                             if bb.codes.len() != 1 || bb.codes[0] != event.code {
@@ -1828,6 +1859,72 @@ mod tests {
         assert!(
             trigger_calls.lock_or_recover().is_empty(),
             "Partial chord press should not fire trigger"
+        );
+    }
+
+    // ─── Scroll event bus publishing ──────────────────────────────────────────
+
+    fn make_processor_with_bus(bus: Arc<EventBus>) -> DeviceProcessor {
+        let binding = make_binding(DeviceMatch::ByName { contains: "test".into() });
+        let (engine, _, logger) = make_oneshot_engine("test_trigger");
+        DeviceProcessor::new(binding, engine, logger, None, "test-device".to_string(), Some(bus))
+    }
+
+    #[test]
+    fn test_rel_wheel_publishes_scroll_received() {
+        let bus = Arc::new(EventBus::new());
+        let rx = bus.subscribe(Some(vec![crate::event_bus::EventType::ScrollReceived]));
+        let mut proc = make_processor_with_bus(bus);
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_WHEEL, value: 1 },
+            InputEvent { event_type: EV_SYN, code: SYN_REPORT, value: 0 },
+        ]);
+
+        let event = rx.recv_timeout(Duration::from_millis(200)).expect("ScrollReceived not published");
+        assert!(
+            matches!(event, Event::ScrollReceived { delta_x: 0, delta_y: 1, .. }),
+            "Unexpected event: {:?}", event
+        );
+    }
+
+    #[test]
+    fn test_rel_hwheel_publishes_scroll_received() {
+        let bus = Arc::new(EventBus::new());
+        let rx = bus.subscribe(Some(vec![crate::event_bus::EventType::ScrollReceived]));
+        let mut proc = make_processor_with_bus(bus);
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_HWHEEL, value: -1 },
+            InputEvent { event_type: EV_SYN, code: SYN_REPORT, value: 0 },
+        ]);
+
+        let event = rx.recv_timeout(Duration::from_millis(200)).expect("ScrollReceived not published");
+        assert!(
+            matches!(event, Event::ScrollReceived { delta_x: -1, delta_y: 0, .. }),
+            "Unexpected event: {:?}", event
+        );
+    }
+
+    #[test]
+    fn test_hi_res_wheel_does_not_publish() {
+        use crate::evdev_source::{REL_HWHEEL_HI_RES, REL_WHEEL_HI_RES};
+        let bus = Arc::new(EventBus::new());
+        let rx = bus.subscribe(Some(vec![crate::event_bus::EventType::ScrollReceived]));
+        let mut proc = make_processor_with_bus(bus);
+
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_WHEEL_HI_RES, value: 120 },
+            InputEvent { event_type: EV_SYN, code: SYN_REPORT, value: 0 },
+        ]);
+        proc.process_events(&[
+            InputEvent { event_type: EV_REL, code: REL_HWHEEL_HI_RES, value: -120 },
+            InputEvent { event_type: EV_SYN, code: SYN_REPORT, value: 0 },
+        ]);
+
+        assert!(
+            rx.recv_timeout(Duration::from_millis(100)).is_err(),
+            "Hi-res wheel events should not publish ScrollReceived"
         );
     }
 }
