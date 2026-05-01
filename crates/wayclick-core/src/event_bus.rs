@@ -1,3 +1,4 @@
+use crate::focus_tracker::WindowInfo;
 use crate::MutexExt;
 use serde::Serialize;
 use std::sync::mpsc;
@@ -24,6 +25,8 @@ pub enum EventType {
     /// Raw key/button press or release observed by the evdev monitor.
     /// Only value=1 (press) and value=0 (release) are published; repeats (value=2) are filtered.
     InputReceived,
+    /// The focused window changed (new process/app gained focus, or window title updated).
+    FocusChanged,
 }
 
 impl EventType {
@@ -35,6 +38,7 @@ impl EventType {
             "enabled_changed" => Some(Self::EnabledChanged),
             "config_reloaded" => Some(Self::ConfigReloaded),
             "input_received" => Some(Self::InputReceived),
+            "focus_changed" => Some(Self::FocusChanged),
             _ => None,
         }
     }
@@ -72,6 +76,17 @@ pub enum Event {
         device_name: String,
         timestamp_ms: u64,
     },
+    /// The focused window changed.
+    ///
+    /// `window` is `None` when focus moves to the desktop (no window focused).
+    /// `previous` is `None` when focus was previously unknown (e.g., at startup).
+    /// Both `app_id` changes and title-only changes emit this event; the `previous`
+    /// field lets subscribers compare to detect process-level changes.
+    FocusChanged {
+        window: Option<WindowInfo>,
+        previous: Option<WindowInfo>,
+        timestamp_ms: u64,
+    },
 }
 
 impl Event {
@@ -83,6 +98,7 @@ impl Event {
             Event::EnabledChanged { .. } => EventType::EnabledChanged,
             Event::ConfigReloaded { .. } => EventType::ConfigReloaded,
             Event::InputReceived { .. } => EventType::InputReceived,
+            Event::FocusChanged { .. } => EventType::FocusChanged,
         }
     }
 
@@ -126,6 +142,14 @@ impl Event {
             code,
             value,
             device_name,
+            timestamp_ms: now_ms(),
+        }
+    }
+
+    pub fn focus_changed(window: Option<WindowInfo>, previous: Option<WindowInfo>) -> Self {
+        Self::FocusChanged {
+            window,
+            previous,
             timestamp_ms: now_ms(),
         }
     }

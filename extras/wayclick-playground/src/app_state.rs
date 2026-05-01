@@ -2,7 +2,7 @@
 // the macroquad main loop via mpsc channels.
 
 use crate::events::{EventRing, InputEvent};
-use crate::ipc_client::{IpcCommand, IpcMessage, ServiceStatus, TriggerInfo};
+use crate::ipc_client::{FocusedWindow, IpcCommand, IpcMessage, ServiceStatus, TriggerInfo};
 use crate::particles::ParticleSystem;
 use crate::perf::PerfCounters;
 use macroquad::prelude::MouseButton;
@@ -36,6 +36,7 @@ pub struct AppState {
     pub triggers: Vec<TriggerEntry>,
     pub trigger_scroll: usize,
     pub selected_trigger: Option<usize>,
+    pub focused_window: Option<FocusedWindow>,
 
     ipc_rx: Receiver<IpcMessage>,
     ipc_cmd_tx: Sender<IpcCommand>,
@@ -51,6 +52,7 @@ impl AppState {
             triggers: Vec::new(),
             trigger_scroll: 0,
             selected_trigger: None,
+            focused_window: None,
             ipc_rx,
             ipc_cmd_tx,
         }
@@ -68,10 +70,17 @@ impl AppState {
     ) {
         while let Ok(msg) = self.ipc_rx.try_recv() {
             match msg {
-                IpcMessage::Connected { status, triggers } => {
+                IpcMessage::Connected {
+                    status,
+                    triggers,
+                    initial_focus,
+                } => {
                     self.apply_status(&status);
                     self.apply_triggers(triggers);
                     self.connection = ConnectionStatus::Connected;
+                    if let Some(fw) = initial_focus {
+                        self.focused_window = Some(fw);
+                    }
                     events.push(InputEvent::ServiceEvent(format!(
                         "Connected ({})",
                         if self.dry_run { "dry-run" } else { "live" }
@@ -80,6 +89,7 @@ impl AppState {
 
                 IpcMessage::Disconnected => {
                     self.connection = ConnectionStatus::Disconnected;
+                    self.focused_window = None;
                     // Clear active flags — we've lost state
                     for t in &mut self.triggers {
                         t.live_active = false;
@@ -147,6 +157,28 @@ impl AppState {
 
                 IpcMessage::TriggerListUpdated(triggers) => {
                     self.apply_triggers(triggers);
+                }
+
+                IpcMessage::FocusChanged(window) => {
+                    let app_id = window
+                        .as_ref()
+                        .map(|w| w.app_id.clone())
+                        .unwrap_or_default();
+                    let title = window
+                        .as_ref()
+                        .map(|w| w.title.clone())
+                        .unwrap_or_default();
+                    let process_name = window.as_ref().and_then(|w| w.process_name.clone());
+                    let xwayland = window.as_ref().map(|w| w.xwayland).unwrap_or(false);
+                    self.focused_window = window;
+                    if !app_id.is_empty() {
+                        events.push(InputEvent::FocusChanged {
+                            app_id,
+                            title,
+                            process_name,
+                            xwayland,
+                        });
+                    }
                 }
             }
         }

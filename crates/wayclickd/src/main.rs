@@ -9,6 +9,7 @@ use wayclick_core::config_watcher::ConfigWatcher;
 use wayclick_core::engine::{with_engine_events, Engine};
 use wayclick_core::event_bus::EventBus;
 use wayclick_core::evdev_monitor::EvdevMonitor;
+use wayclick_core::focus_tracker::FocusTracker;
 use wayclick_core::input_backend::{InputBackend, LoggingBackend};
 use wayclick_core::ipc::IpcServer;
 use wayclick_core::logger::{LogLevel, Logger};
@@ -124,6 +125,9 @@ fn main() {
     // Create shared event bus
     let event_bus = Arc::new(EventBus::new());
 
+    // Start focus tracker (auto-detects Hyprland, Sway, or falls back to None).
+    let focus_tracker = FocusTracker::start(event_bus.clone(), logger.clone());
+
     // Create backend: UinputBackend for real mode, LoggingBackend for dry-run
     let backend: Arc<dyn wayclick_core::input_backend::InputBackend> = if config.options.dry_run {
         logger.info("Starting in dry-run mode (LoggingBackend)");
@@ -166,6 +170,7 @@ fn main() {
         engine.clone(),
         logger.clone(),
         event_bus.clone(),
+        Some(focus_tracker.clone()),
     ) {
         Ok(s) => Arc::new(s),
         Err(e) => {
@@ -256,6 +261,7 @@ fn main() {
     logger.info("Shutting down...");
     config_watcher.stop();
     evdev_monitor.stop();
+    focus_tracker.stop();
     ipc_shutdown.store(true, Ordering::Relaxed);
     let _ = ipc_handle.join();
     logger.info("wayclickd stopped");

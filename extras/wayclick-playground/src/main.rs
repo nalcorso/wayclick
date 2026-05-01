@@ -110,7 +110,8 @@ async fn main() {
         let canvas_h = sh - hud_h - status_h;
 
         let trigger_list_h = 300.0_f32;
-        let log_h = (canvas_h - trigger_list_h).max(60.0);
+        let focus_h = 76.0_f32;
+        let log_h = (sh - status_h - hud_h - trigger_list_h - focus_h).max(60.0);
 
         // ============================================================
         // Pass 1: Render particles to off-screen target for bloom
@@ -198,7 +199,17 @@ async fn main() {
             app_state.toggle_trigger_enabled(clicked_idx);
         }
 
-        let log_y = trigger_y + trigger_list_h;
+        let focus_y = trigger_y + trigger_list_h;
+        ui::draw_focus_widget(
+            panel_x,
+            focus_y,
+            right_panel_w,
+            focus_h,
+            app_state.focused_window.as_ref(),
+            &font,
+        );
+
+        let log_y = focus_y + focus_h;
         ui::draw_event_log(panel_x, log_y, right_panel_w, log_h, &events, &font);
 
         ui::draw_status_bar(

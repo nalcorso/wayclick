@@ -34,3 +34,8 @@ pub const LAYER_BADGE: Color = Color::new(0.65, 0.3, 1.0, 1.0); // violet
 // Event log source indicators
 pub const SOURCE_IPC: Color = Color::new(0.0, 0.8, 1.0, 0.35); // dim cyan — normal IPC path
 pub const SOURCE_LOCAL: Color = Color::new(1.0, 0.7, 0.2, 0.85); // amber — macroquad fallback
+
+// Focus tracker
+pub const FOCUS_CHANGE: Color = Color::new(0.7, 0.5, 1.0, 0.9); // soft lavender
+pub const FOCUS_WIDGET_BG: Color = Color::new(0.06, 0.04, 0.12, 0.9); // deep purple tint
+pub const FOCUS_WIDGET_LABEL: Color = Color::new(0.55, 0.38, 0.85, 1.0); // muted purple label

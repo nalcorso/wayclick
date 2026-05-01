@@ -42,12 +42,24 @@ pub struct TriggerInfo {
     pub dynamic: bool,
 }
 
+/// A focused window as reported by the wayclick daemon.
+#[derive(Debug, Clone)]
+pub struct FocusedWindow {
+    pub app_id: String,
+    pub title: String,
+    pub process_name: Option<String>,
+    #[allow(dead_code)]
+    pub backend: String,
+    pub xwayland: bool,
+}
+
 /// Messages sent from the IPC thread to the main (macroquad) thread.
 #[derive(Debug)]
 pub enum IpcMessage {
     Connected {
         status: ServiceStatus,
         triggers: Vec<TriggerInfo>,
+        initial_focus: Option<FocusedWindow>,
     },
     Disconnected,
     TriggerActivated(String),
@@ -66,6 +78,7 @@ pub enum IpcMessage {
     EnabledChanged(bool),
     ConfigReloaded,
     TriggerListUpdated(Vec<TriggerInfo>),
+    FocusChanged(Option<FocusedWindow>),
 }
 
 /// Commands sent from the main (macroquad) thread to the IPC background thread.
@@ -211,6 +224,33 @@ fn parse_triggers(v: &Value) -> Vec<TriggerInfo> {
         .collect()
 }
 
+/// Parse a `FocusedWindow` from a JSON value. Returns `None` if value is null/absent.
+fn parse_focused_window(val: Option<&Value>) -> Option<FocusedWindow> {
+    let obj = val?.as_object()?;
+    let app_id = obj.get("app_id")?.as_str()?.to_string();
+    Some(FocusedWindow {
+        app_id,
+        title: obj
+            .get("title")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        process_name: obj
+            .get("process_name")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        backend: obj
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        xwayland: obj
+            .get("xwayland")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    })
+}
+
 /// Convert a server-sent event frame to an IpcMessage. Returns None for unrecognised frames.
 fn frame_to_message(val: &Value) -> Option<IpcMessage> {
     // Only unsolicited events have method = "event"
@@ -260,6 +300,10 @@ fn frame_to_message(val: &Value) -> Option<IpcMessage> {
                 value,
                 device_name,
             })
+        }
+        "focus_changed" => {
+            let window = parse_focused_window(params.get("window"));
+            Some(IpcMessage::FocusChanged(window))
         }
         _ => None,
     }
@@ -314,8 +358,22 @@ fn run_connection_inner(
     // Drain the subscribe response (we don't need its content)
     let _ = read_one_blocking(&mut stream)?;
 
+    // 4. Query current focused window
+    let focus_req = json!({"jsonrpc":"2.0","id":4,"method":"get_focus","params":null});
+    let initial_focus = if write_frame(&mut stream, &focus_req) {
+        read_one_blocking(&mut stream)
+            .and_then(|v| v.get("result")?.get("window").map(|w| parse_focused_window(Some(w))))
+            .flatten()
+    } else {
+        None
+    };
+
     // Signal successful connection
-    let _ = msg_tx.send(IpcMessage::Connected { status, triggers });
+    let _ = msg_tx.send(IpcMessage::Connected {
+        status,
+        triggers,
+        initial_focus,
+    });
 
     // ── Non-blocking event loop ───────────────────────────────────────────
     stream.set_nonblocking(true).ok();

@@ -7,6 +7,7 @@ use macroquad::prelude::*;
 use crate::app_state::{ConnectionStatus, TriggerEntry};
 use crate::colors;
 use crate::events::EventRing;
+use crate::ipc_client::FocusedWindow;
 use crate::particles::ParticleSystem;
 use crate::perf::PerfCounters;
 
@@ -363,6 +364,85 @@ pub fn draw_trigger_list(
 
     draw_line(x + pad, y + h - 1.0, x + w - pad, y + h - 1.0, 1.0, colors::GRID);
     clicked
+}
+
+// ─── Focused window widget ─────────────────────────────────────────────────
+
+pub fn draw_focus_widget(
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    window: Option<&FocusedWindow>,
+    font: &Font,
+) {
+    draw_rectangle(x, y, w, h, colors::FOCUS_WIDGET_BG);
+    draw_line(x + 8.0, y + 24.0, x + w - 8.0, y + 24.0, 1.0, colors::GRID);
+
+    draw_text_ex(
+        "FOCUSED WINDOW",
+        x + 8.0,
+        y + 18.0,
+        TextParams {
+            font_size: 13,
+            font: Some(font),
+            color: colors::FOCUS_WIDGET_LABEL,
+            ..Default::default()
+        },
+    );
+
+    let sz: u16 = 13;
+    match window {
+        None => {
+            draw_text_ex(
+                "⊙  —",
+                x + 8.0,
+                y + 44.0,
+                TextParams {
+                    font_size: sz,
+                    font: Some(font),
+                    color: colors::TEXT_DIM,
+                    ..Default::default()
+                },
+            );
+        }
+        Some(fw) => {
+            let name = fw
+                .process_name
+                .as_deref()
+                .filter(|s| !s.is_empty())
+                .unwrap_or(fw.app_id.as_str());
+            let xw_tag = if fw.xwayland { " [XWayland]" } else { "" };
+            let app_text = format!("⊙  {}{}", truncate_str(name, 22), xw_tag);
+            draw_text_ex(
+                &app_text,
+                x + 8.0,
+                y + 42.0,
+                TextParams {
+                    font_size: sz,
+                    font: Some(font),
+                    color: colors::FOCUS_CHANGE,
+                    ..Default::default()
+                },
+            );
+
+            if !fw.title.is_empty() {
+                let title_text = truncate_str(&fw.title, 34);
+                draw_text_ex(
+                    &title_text,
+                    x + 8.0,
+                    y + 60.0,
+                    TextParams {
+                        font_size: sz - 1,
+                        font: Some(font),
+                        color: colors::TEXT_DIM,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+    }
+    draw_line(x + 8.0, y + h - 1.0, x + w - 8.0, y + h - 1.0, 1.0, colors::GRID);
 }
 
 // ─── Event log (right panel) ──────────────────────────────────────────────

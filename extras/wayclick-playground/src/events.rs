@@ -27,6 +27,14 @@ pub enum InputEvent {
     /// A raw evdev key/button event sourced from the IPC InputReceived event.
     /// `value`: 1 = press, 0 = release.
     RawIpcInput { code: u16, value: i32 },
+    /// The focused window changed (sourced from the wayclick daemon).
+    FocusChanged {
+        app_id: String,
+        title: String,
+        process_name: Option<String>,
+        #[allow(dead_code)]
+        xwayland: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -116,6 +124,20 @@ impl InputEvent {
                 let arrow = if *value == 1 { "↓" } else { "↑" };
                 format!("{} {}", evdev_name(*code), arrow)
             }
+            InputEvent::FocusChanged {
+                app_id,
+                title,
+                process_name,
+                ..
+            } => {
+                let name = process_name.as_deref().unwrap_or(app_id.as_str());
+                let t = if title.len() > 30 {
+                    format!("{}…", &title[..29])
+                } else {
+                    title.clone()
+                };
+                format!("⊙ {}  {}", name, t)
+            }
         }
     }
 
@@ -140,6 +162,7 @@ impl InputEvent {
                 275..=279 => colors::SIDE_CLICK,
                 _ => colors::KEYBOARD,
             },
+            InputEvent::FocusChanged { .. } => colors::FOCUS_CHANGE,
         }
     }
 }

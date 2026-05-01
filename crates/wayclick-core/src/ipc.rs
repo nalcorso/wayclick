@@ -1,6 +1,7 @@
 use crate::config::{TriggerBinding, TriggerMode};
 use crate::engine::{with_engine_events, Engine};
 use crate::event_bus::{EventBus, EventType};
+use crate::focus_tracker::FocusTracker;
 use crate::logger::Logger;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -285,6 +286,7 @@ pub struct IpcServer {
     engine: Arc<Mutex<Engine>>,
     logger: Arc<Logger>,
     event_bus: Arc<EventBus>,
+    focus_tracker: Option<Arc<FocusTracker>>,
     shutdown: Arc<std::sync::atomic::AtomicBool>,
     connection_count: Arc<AtomicUsize>,
     connection_id_counter: Arc<AtomicU64>,
@@ -296,6 +298,7 @@ impl IpcServer {
         engine: Arc<Mutex<Engine>>,
         logger: Arc<Logger>,
         event_bus: Arc<EventBus>,
+        focus_tracker: Option<Arc<FocusTracker>>,
     ) -> Result<Self, IpcError> {
         // Remove existing socket
         let _ = std::fs::remove_file(&socket_path);
@@ -326,6 +329,7 @@ impl IpcServer {
             engine,
             logger,
             event_bus,
+            focus_tracker,
             shutdown: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             connection_count: Arc::new(AtomicUsize::new(0)),
             connection_id_counter: Arc::new(AtomicU64::new(1)),
@@ -364,6 +368,7 @@ impl IpcServer {
                     let engine = self.engine.clone();
                     let logger = self.logger.clone();
                     let event_bus = self.event_bus.clone();
+                    let focus_tracker = self.focus_tracker.clone();
                     let conn_id = self
                         .connection_id_counter
                         .fetch_add(1, Ordering::Relaxed);
@@ -372,7 +377,7 @@ impl IpcServer {
                     };
                     thread::spawn(move || {
                         let _guard = guard;
-                        handle_client(stream, engine, logger, event_bus, conn_id);
+                        handle_client(stream, engine, logger, event_bus, focus_tracker, conn_id);
                     });
                 }
                 Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
@@ -405,6 +410,7 @@ fn handle_client(
     engine: Arc<Mutex<Engine>>,
     logger: Arc<Logger>,
     event_bus: Arc<EventBus>,
+    focus_tracker: Option<Arc<FocusTracker>>,
     conn_id: u64,
 ) {
     // Bounded writer channel — prevents unbounded memory growth from slow writers.
@@ -444,6 +450,7 @@ fn handle_client(
                     &logger,
                     conn_id,
                     &event_bus,
+                    focus_tracker.as_ref(),
                     &writer_tx,
                     &mut sub_stop_tx,
                 );
@@ -501,6 +508,7 @@ fn handle_request_with_conn(
     logger: &Arc<Logger>,
     conn_id: u64,
     event_bus: &Arc<EventBus>,
+    focus_tracker: Option<&Arc<FocusTracker>>,
     writer_tx: &std::sync::mpsc::SyncSender<WriterMsg>,
     sub_stop_tx: &mut Option<std::sync::mpsc::Sender<()>>,
 ) -> Value {
@@ -629,6 +637,13 @@ fn handle_request_with_conn(
                 .unwrap()
                 .dynamic_triggers_for_connection(conn_id);
             make_response(id, serde_json::to_value(&triggers).unwrap_or(json!([])))
+        }
+
+        "get_focus" => {
+            let window = focus_tracker
+                .and_then(|ft| ft.get_current())
+                .map(|w| serde_json::to_value(&w).unwrap_or(json!(null)));
+            make_response(id, json!({ "window": window.unwrap_or(json!(null)) }))
         }
 
         _ => handle_request(request, engine, logger),
@@ -884,7 +899,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("test.sock");
 
-        let server = IpcServer::new(socket_path.clone(), engine, logger, Arc::new(EventBus::new())).unwrap();
+        let server = IpcServer::new(socket_path.clone(), engine, logger, Arc::new(EventBus::new()), None).unwrap();
         let shutdown = server.shutdown_flag();
 
         let server_handle = thread::spawn(move || {

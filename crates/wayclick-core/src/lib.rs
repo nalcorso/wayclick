@@ -4,6 +4,7 @@ pub mod engine;
 pub mod event_bus;
 pub mod evdev_monitor;
 pub mod evdev_source;
+pub mod focus_tracker;
 pub mod input_backend;
 pub mod ipc;
 pub mod logger;
