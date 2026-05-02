@@ -129,7 +129,7 @@ impl Engine {
             enabled: false,
             start_time: Instant::now(),
             config_path,
-            current_layer: "base".to_string(),
+            current_layer: BASE_LAYER.to_string(),
             trigger_stats: HashMap::new(),
             trigger_enabled: HashMap::new(),
             pending_events: Vec::new(),
@@ -388,44 +388,48 @@ impl Engine {
         }
     }
 
+    /// Build a `TriggerSnapshot` for a trigger by looking up its current activation
+    /// state, accumulated stats, and user-enabled flag in the engine's maps.
+    fn build_snapshot(
+        &self,
+        id: &str,
+        name: &str,
+        mode: TriggerMode,
+        action_type: &str,
+        dynamic: bool,
+    ) -> TriggerSnapshot {
+        let active = matches!(self.state.get(id), Some(TriggerState::Active { .. }));
+        let stats = self.trigger_stats.get(id).cloned().unwrap_or_default();
+        let user_enabled = self.trigger_enabled.get(id).copied().unwrap_or(true);
+        TriggerSnapshot {
+            id: id.to_string(),
+            name: name.to_string(),
+            mode,
+            action_type: action_type.to_string(),
+            active,
+            dynamic,
+            activate_count: stats.activate_count,
+            last_activated_ms: stats.last_activated_ms,
+            user_enabled,
+        }
+    }
+
     pub fn triggers_snapshot(&self) -> Vec<TriggerSnapshot> {
         let mut snapshots: Vec<TriggerSnapshot> = self
             .config
             .triggers
             .iter()
-            .map(|t| {
-                let active = matches!(self.state.get(&t.id), Some(TriggerState::Active { .. }));
-                let stats = self.trigger_stats.get(&t.id).cloned().unwrap_or_default();
-                let user_enabled = self.trigger_enabled.get(&t.id).copied().unwrap_or(true);
-                TriggerSnapshot {
-                    id: t.id.clone(),
-                    name: t.name.clone(),
-                    mode: t.mode,
-                    action_type: t.action.type_name().to_string(),
-                    active,
-                    dynamic: false,
-                    activate_count: stats.activate_count,
-                    last_activated_ms: stats.last_activated_ms,
-                    user_enabled,
-                }
-            })
+            .map(|t| self.build_snapshot(&t.id, &t.name, t.mode, t.action.type_name(), false))
             .collect();
 
         for (id, entry) in &self.dynamic_triggers {
-            let active = matches!(self.state.get(id), Some(TriggerState::Active { .. }));
-            let stats = self.trigger_stats.get(id).cloned().unwrap_or_default();
-            let user_enabled = self.trigger_enabled.get(id).copied().unwrap_or(true);
-            snapshots.push(TriggerSnapshot {
-                id: id.clone(),
-                name: entry.trigger.name.clone(),
-                mode: entry.trigger.mode,
-                action_type: entry.trigger.action.type_name().to_string(),
-                active,
-                dynamic: true,
-                activate_count: stats.activate_count,
-                last_activated_ms: stats.last_activated_ms,
-                user_enabled,
-            });
+            snapshots.push(self.build_snapshot(
+                id,
+                &entry.trigger.name,
+                entry.trigger.mode,
+                entry.trigger.action.type_name(),
+                true,
+            ));
         }
 
         snapshots
@@ -519,20 +523,13 @@ impl Engine {
             .iter()
             .filter(|(_, e)| e.owner_connection_id == owner_connection_id)
             .map(|(id, entry)| {
-                let active = matches!(self.state.get(id), Some(TriggerState::Active { .. }));
-                let stats = self.trigger_stats.get(id).cloned().unwrap_or_default();
-                let user_enabled = self.trigger_enabled.get(id).copied().unwrap_or(true);
-                TriggerSnapshot {
-                    id: id.clone(),
-                    name: entry.trigger.name.clone(),
-                    mode: entry.trigger.mode,
-                    action_type: entry.trigger.action.type_name().to_string(),
-                    active,
-                    dynamic: true,
-                    activate_count: stats.activate_count,
-                    last_activated_ms: stats.last_activated_ms,
-                    user_enabled,
-                }
+                self.build_snapshot(
+                    id,
+                    &entry.trigger.name,
+                    entry.trigger.mode,
+                    entry.trigger.action.type_name(),
+                    true,
+                )
             })
             .collect()
     }
@@ -567,7 +564,7 @@ impl Engine {
     /// Always includes `"base"`. Results are sorted alphabetically.
     pub fn available_layers(&self) -> Vec<String> {
         let mut layers: BTreeSet<String> = BTreeSet::new();
-        layers.insert("base".to_string());
+        layers.insert(BASE_LAYER.to_string());
 
         for device_binding in &self.config.device_bindings {
             for binding in &device_binding.bindings {
@@ -624,6 +621,67 @@ pub fn with_engine_events<T>(engine: &Arc<Mutex<Engine>>, f: impl FnOnce(&mut En
         bus.publish(&event);
     }
     result
+}
+
+/// Settle delay between move-to-start and press, and between press and the first
+/// interpolation step of a drag operation.
+const DRAG_PRESS_SETTLE_MS: u64 = 5;
+/// Per-step delay during drag interpolation; also the divisor that determines step count
+/// (`steps = duration_ms / DRAG_STEP_INTERVAL_MS`).
+const DRAG_STEP_INTERVAL_MS: u32 = 10;
+
+/// Execute a Drag action: press at `(from_x, from_y)`, interpolate to `(to_x, to_y)` over
+/// `duration_ms`, then release. When `stop_rx` is `Some`, the interpolation loop checks
+/// for a stop signal between steps and exits early after releasing the button.
+#[allow(clippy::too_many_arguments)]
+fn execute_drag(
+    backend: &Arc<dyn InputBackend>,
+    from_x: i32,
+    from_y: i32,
+    to_x: i32,
+    to_y: i32,
+    button: MouseButton,
+    duration_ms: u32,
+    stop_rx: Option<&mpsc::Receiver<()>>,
+) -> Result<(), BackendError> {
+    backend.move_absolute(from_x, from_y)?;
+    thread::sleep(Duration::from_millis(DRAG_PRESS_SETTLE_MS));
+    backend.mouse_press(button)?;
+    thread::sleep(Duration::from_millis(DRAG_PRESS_SETTLE_MS));
+
+    let steps = (duration_ms / DRAG_STEP_INTERVAL_MS).max(1);
+    for i in 1..=steps {
+        if let Some(rx) = stop_rx {
+            if rx.try_recv().is_ok() {
+                backend.mouse_release(button)?;
+                return Ok(());
+            }
+        }
+        let t = i as f64 / steps as f64;
+        let ix = from_x as f64 + (to_x - from_x) as f64 * t;
+        let iy = from_y as f64 + (to_y - from_y) as f64 * t;
+        backend.move_absolute(ix as i32, iy as i32)?;
+        thread::sleep(Duration::from_millis(DRAG_STEP_INTERVAL_MS as u64));
+    }
+
+    backend.mouse_release(button)?;
+    Ok(())
+}
+
+/// Execute a ClickAt action: move to `(x, y)`, optionally settle, then click.
+fn execute_click_at(
+    backend: &Arc<dyn InputBackend>,
+    x: i32,
+    y: i32,
+    button: MouseButton,
+    hold_ms: u32,
+    settle_ms: u32,
+) -> Result<(), BackendError> {
+    backend.move_absolute(x, y)?;
+    if settle_ms > 0 {
+        thread::sleep(Duration::from_millis(settle_ms as u64));
+    }
+    do_click(backend, button, hold_ms)
 }
 
 /// Execute an action in a loop (for Toggle/Hold worker threads).
@@ -791,11 +849,7 @@ fn execute_action_loop(
             hold_ms,
             settle_ms,
         } => {
-            backend.move_absolute(*x, *y)?;
-            if *settle_ms > 0 {
-                thread::sleep(Duration::from_millis(*settle_ms as u64));
-            }
-            do_click(backend, *button, *hold_ms)?;
+            execute_click_at(backend, *x, *y, *button, *hold_ms, *settle_ms)?;
         }
         ActionConfig::Drag {
             from_x,
@@ -805,25 +859,16 @@ fn execute_action_loop(
             button,
             duration_ms,
         } => {
-            backend.move_absolute(*from_x, *from_y)?;
-            thread::sleep(Duration::from_millis(5));
-            backend.mouse_press(*button)?;
-            thread::sleep(Duration::from_millis(5));
-
-            let steps = (*duration_ms / 10).max(1);
-            for i in 1..=steps {
-                if stop_rx.try_recv().is_ok() {
-                    backend.mouse_release(*button)?;
-                    return Ok(());
-                }
-                let t = i as f64 / steps as f64;
-                let ix = *from_x as f64 + (*to_x - *from_x) as f64 * t;
-                let iy = *from_y as f64 + (*to_y - *from_y) as f64 * t;
-                backend.move_absolute(ix as i32, iy as i32)?;
-                thread::sleep(Duration::from_millis(10));
-            }
-
-            backend.mouse_release(*button)?;
+            execute_drag(
+                backend,
+                *from_x,
+                *from_y,
+                *to_x,
+                *to_y,
+                *button,
+                *duration_ms,
+                Some(stop_rx),
+            )?;
         }
         ActionConfig::SetLayer { layer } => {
             // Can't actually change layer from a worker thread — log warning
@@ -947,11 +992,7 @@ fn execute_action_sync(
             hold_ms,
             settle_ms,
         } => {
-            backend.move_absolute(*x, *y)?;
-            if *settle_ms > 0 {
-                thread::sleep(Duration::from_millis(*settle_ms as u64));
-            }
-            do_click(backend, *button, *hold_ms)?;
+            execute_click_at(backend, *x, *y, *button, *hold_ms, *settle_ms)?;
         }
         ActionConfig::Drag {
             from_x,
@@ -961,22 +1002,16 @@ fn execute_action_sync(
             button,
             duration_ms,
         } => {
-            backend.move_absolute(*from_x, *from_y)?;
-            thread::sleep(Duration::from_millis(5));
-            backend.mouse_press(*button)?;
-            thread::sleep(Duration::from_millis(5));
-
-            // Interpolate movement over duration
-            let steps = (*duration_ms / 10).max(1);
-            for i in 1..=steps {
-                let t = i as f64 / steps as f64;
-                let ix = *from_x as f64 + (*to_x - *from_x) as f64 * t;
-                let iy = *from_y as f64 + (*to_y - *from_y) as f64 * t;
-                backend.move_absolute(ix as i32, iy as i32)?;
-                thread::sleep(Duration::from_millis(10));
-            }
-
-            backend.mouse_release(*button)?;
+            execute_drag(
+                backend,
+                *from_x,
+                *from_y,
+                *to_x,
+                *to_y,
+                *button,
+                *duration_ms,
+                None,
+            )?;
         }
         ActionConfig::SetLayer { layer } => {
             // SetLayer is handled by the caller (engine) since it needs mutable access.
@@ -1619,5 +1654,45 @@ mod tests {
             .triggers_snapshot()
             .iter()
             .any(|t| t.id == "valid_dyn" && t.dynamic));
+    }
+
+    /// When `execute_drag` is called with `Some(stop_rx)` and the stop channel already
+    /// has a signal, the interpolation loop must short-circuit on its first check —
+    /// pressing the button, then releasing it, with no intervening interpolation moves.
+    #[test]
+    fn test_execute_drag_early_stop_releases_button() {
+        let mock = MockBackend::new();
+        let calls = mock.calls_clone();
+        let backend: Arc<dyn InputBackend> = Arc::new(mock);
+
+        let (stop_tx, stop_rx) = mpsc::channel::<()>();
+        // Fire the stop signal before `execute_drag` runs so the very first
+        // iteration of the interpolation loop sees it.
+        stop_tx.send(()).unwrap();
+
+        let result = execute_drag(
+            &backend,
+            10,
+            20,
+            100,
+            200,
+            MouseButton::Left,
+            500,
+            Some(&stop_rx),
+        );
+        assert!(result.is_ok());
+
+        // Expected sequence: MoveAbsolute(start) -> MousePress -> MouseRelease.
+        // No interpolation MoveAbsolute calls should occur.
+        let recorded = calls.lock_or_recover().clone();
+        assert_eq!(
+            recorded,
+            vec![
+                BackendCall::MoveAbsolute(10, 20),
+                BackendCall::MousePress(MouseButton::Left),
+                BackendCall::MouseRelease(MouseButton::Left),
+            ],
+            "early-stop drag must press, then release without interpolating"
+        );
     }
 }

@@ -171,9 +171,10 @@ fn find_focused_node(node: &serde_json::Value) -> Option<&serde_json::Value> {
         // Only return leaf nodes (actual windows, not containers)
         let node_type = node.get("type").and_then(|t| t.as_str()).unwrap_or("");
         if matches!(node_type, "con" | "floating_con" | "xwayland_view")
-            && (node.get("app_id").is_some() || node.get("window_properties").is_some()) {
-                return Some(node);
-            }
+            && (node.get("app_id").is_some() || node.get("window_properties").is_some())
+        {
+            return Some(node);
+        }
     }
 
     for child_key in &["nodes", "floating_nodes"] {

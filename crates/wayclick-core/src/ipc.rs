@@ -19,6 +19,13 @@ use thiserror::Error;
 /// Prevents connection flood attacks from exhausting system threads.
 const MAX_IPC_CONNECTIONS: usize = 32;
 
+/// JSON-RPC 2.0 error codes used in responses.
+/// `-32601` and `-32602` are spec-defined; `-32000` is in the implementation-defined
+/// server-error range and is used here for engine/runtime failures.
+const JSONRPC_INTERNAL_ERROR: i32 = -32000;
+const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
+const JSONRPC_INVALID_PARAMS: i32 = -32602;
+
 #[derive(Debug, Error)]
 pub enum IpcError {
     #[error("IO error: {0}")]
@@ -152,13 +159,13 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
                 .unwrap_or(true);
 
             if trigger_id.is_empty() {
-                return make_error(id, -32602, "Missing 'id' parameter");
+                return make_error(id, JSONRPC_INVALID_PARAMS, "Missing 'id' parameter");
             }
 
             let trigger_id = trigger_id.to_string();
             match with_engine_events(engine, |eng| eng.trigger_event(&trigger_id, press)) {
                 Ok(()) => make_response(id, json!({ "triggered": trigger_id })),
-                Err(e) => make_error(id, -32000, &e.to_string()),
+                Err(e) => make_error(id, JSONRPC_INTERNAL_ERROR, &e.to_string()),
             }
         }
 
@@ -207,7 +214,7 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
                 .unwrap_or("");
 
             if layer.is_empty() {
-                return make_error(id, -32602, "Missing 'layer' parameter");
+                return make_error(id, JSONRPC_INVALID_PARAMS, "Missing 'layer' parameter");
             }
 
             let layer = layer.to_string();
@@ -226,11 +233,11 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if trigger_id.is_empty() {
-                return make_error(id, -32602, "Missing 'id' parameter");
+                return make_error(id, JSONRPC_INVALID_PARAMS, "Missing 'id' parameter");
             }
             match with_engine_events(engine, |eng| eng.enable_trigger(trigger_id)) {
                 Ok(()) => make_response(id, json!({ "enabled": trigger_id })),
-                Err(e) => make_error(id, -32602, &e.to_string()),
+                Err(e) => make_error(id, JSONRPC_INVALID_PARAMS, &e.to_string()),
             }
         }
 
@@ -240,15 +247,19 @@ pub fn handle_request(request: &Value, engine: &Arc<Mutex<Engine>>, logger: &Arc
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if trigger_id.is_empty() {
-                return make_error(id, -32602, "Missing 'id' parameter");
+                return make_error(id, JSONRPC_INVALID_PARAMS, "Missing 'id' parameter");
             }
             match with_engine_events(engine, |eng| eng.disable_trigger(trigger_id)) {
                 Ok(()) => make_response(id, json!({ "disabled": trigger_id })),
-                Err(e) => make_error(id, -32602, &e.to_string()),
+                Err(e) => make_error(id, JSONRPC_INVALID_PARAMS, &e.to_string()),
             }
         }
 
-        _ => make_error(id, -32601, &format!("Method not found: {}", method)),
+        _ => make_error(
+            id,
+            JSONRPC_METHOD_NOT_FOUND,
+            &format!("Method not found: {}", method),
+        ),
     }
 }
 
@@ -588,12 +599,16 @@ fn handle_request_with_conn(
         "register_trigger" => {
             let params = match params {
                 Some(p) => p,
-                None => return make_error(id, -32602, "Missing params"),
+                None => return make_error(id, JSONRPC_INVALID_PARAMS, "Missing params"),
             };
             let rtp: RegisterTriggerParams = match serde_json::from_value(params.clone()) {
                 Ok(p) => p,
                 Err(e) => {
-                    return make_error(id, -32602, &format!("Invalid params: {}", e));
+                    return make_error(
+                        id,
+                        JSONRPC_INVALID_PARAMS,
+                        &format!("Invalid params: {}", e),
+                    );
                 }
             };
             let trigger_id = rtp.id.clone();
@@ -614,13 +629,17 @@ fn handle_request_with_conn(
                 .register_dynamic_trigger(trigger, conn_id)
             {
                 Ok(()) => make_response(id, json!({ "registered": trigger_id })),
-                Err(crate::engine::EngineError::DuplicateTrigger(t)) => {
-                    make_error(id, -32602, &format!("Duplicate trigger ID: {}", t))
-                }
-                Err(crate::engine::EngineError::InvalidConfig(msg)) => {
-                    make_error(id, -32602, &format!("Validation error: {}", msg))
-                }
-                Err(e) => make_error(id, -32000, &e.to_string()),
+                Err(crate::engine::EngineError::DuplicateTrigger(t)) => make_error(
+                    id,
+                    JSONRPC_INVALID_PARAMS,
+                    &format!("Duplicate trigger ID: {}", t),
+                ),
+                Err(crate::engine::EngineError::InvalidConfig(msg)) => make_error(
+                    id,
+                    JSONRPC_INVALID_PARAMS,
+                    &format!("Validation error: {}", msg),
+                ),
+                Err(e) => make_error(id, JSONRPC_INTERNAL_ERROR, &e.to_string()),
             }
         }
 
@@ -630,7 +649,7 @@ fn handle_request_with_conn(
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             if tid.is_empty() {
-                return make_error(id, -32602, "Missing 'id' parameter");
+                return make_error(id, JSONRPC_INVALID_PARAMS, "Missing 'id' parameter");
             }
             match engine
                 .lock()
@@ -638,7 +657,7 @@ fn handle_request_with_conn(
                 .unregister_dynamic_trigger(tid, conn_id)
             {
                 Ok(()) => make_response(id, json!({ "unregistered": tid })),
-                Err(e) => make_error(id, -32000, &e.to_string()),
+                Err(e) => make_error(id, JSONRPC_INTERNAL_ERROR, &e.to_string()),
             }
         }
 
@@ -717,6 +736,26 @@ mod tests {
     use super::*;
     use crate::event_bus::EventBus;
 
+    /// Build a quiet `Logger` and a default `Engine` wired together for handle_request tests.
+    fn make_test_engine() -> (Arc<crate::logger::Logger>, Arc<Mutex<Engine>>) {
+        let logger = Arc::new(crate::logger::Logger::new(
+            100,
+            crate::logger::LogLevel::Trace,
+            false,
+        ));
+        logger.set_quiet(true);
+        let config = crate::config::Config::default();
+        let backend = Arc::new(crate::input_backend::MockBackend::new());
+        let engine = Arc::new(Mutex::new(Engine::new(
+            config,
+            backend,
+            logger.clone(),
+            Arc::new(EventBus::new()),
+            "test".into(),
+        )));
+        (logger, engine)
+    }
+
     #[test]
     fn test_frame_encode_decode() {
         let payload = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
@@ -746,21 +785,7 @@ mod tests {
 
     #[test]
     fn test_handle_request_ping() {
-        let logger = Arc::new(crate::logger::Logger::new(
-            100,
-            crate::logger::LogLevel::Trace,
-            false,
-        ));
-        logger.set_quiet(true);
-        let config = crate::config::Config::default();
-        let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(
-            config,
-            backend,
-            logger.clone(),
-            Arc::new(EventBus::new()),
-            "test".into(),
-        )));
+        let (logger, engine) = make_test_engine();
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
         let response = handle_request(&request, &engine, &logger);
@@ -769,21 +794,7 @@ mod tests {
 
     #[test]
     fn test_handle_request_status() {
-        let logger = Arc::new(crate::logger::Logger::new(
-            100,
-            crate::logger::LogLevel::Trace,
-            false,
-        ));
-        logger.set_quiet(true);
-        let config = crate::config::Config::default();
-        let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(
-            config,
-            backend,
-            logger.clone(),
-            Arc::new(EventBus::new()),
-            "test".into(),
-        )));
+        let (logger, engine) = make_test_engine();
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "status"});
         let response = handle_request(&request, &engine, &logger);
@@ -793,21 +804,7 @@ mod tests {
 
     #[test]
     fn test_handle_request_unknown_method() {
-        let logger = Arc::new(crate::logger::Logger::new(
-            100,
-            crate::logger::LogLevel::Trace,
-            false,
-        ));
-        logger.set_quiet(true);
-        let config = crate::config::Config::default();
-        let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(
-            config,
-            backend,
-            logger.clone(),
-            Arc::new(EventBus::new()),
-            "test".into(),
-        )));
+        let (logger, engine) = make_test_engine();
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "nonexistent"});
         let response = handle_request(&request, &engine, &logger);
@@ -816,21 +813,7 @@ mod tests {
 
     #[test]
     fn test_handle_request_trigger_unknown_id() {
-        let logger = Arc::new(crate::logger::Logger::new(
-            100,
-            crate::logger::LogLevel::Trace,
-            false,
-        ));
-        logger.set_quiet(true);
-        let config = crate::config::Config::default();
-        let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(
-            config,
-            backend,
-            logger.clone(),
-            Arc::new(EventBus::new()),
-            "test".into(),
-        )));
+        let (logger, engine) = make_test_engine();
         with_engine_events(&engine, |eng| eng.set_enabled(true));
 
         let request =
@@ -841,21 +824,7 @@ mod tests {
 
     #[test]
     fn test_handle_request_toggle() {
-        let logger = Arc::new(crate::logger::Logger::new(
-            100,
-            crate::logger::LogLevel::Trace,
-            false,
-        ));
-        logger.set_quiet(true);
-        let config = crate::config::Config::default();
-        let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(
-            config,
-            backend,
-            logger.clone(),
-            Arc::new(EventBus::new()),
-            "test".into(),
-        )));
+        let (logger, engine) = make_test_engine();
 
         let request = json!({"jsonrpc": "2.0", "id": 1, "method": "toggle"});
         let response = handle_request(&request, &engine, &logger);
@@ -867,24 +836,9 @@ mod tests {
 
     #[test]
     fn test_handle_request_logs_tail() {
-        let logger = Arc::new(crate::logger::Logger::new(
-            100,
-            crate::logger::LogLevel::Trace,
-            false,
-        ));
-        logger.set_quiet(true);
+        let (logger, engine) = make_test_engine();
         logger.info("test message 1");
         logger.info("test message 2");
-
-        let config = crate::config::Config::default();
-        let backend = Arc::new(crate::input_backend::MockBackend::new());
-        let engine = Arc::new(Mutex::new(Engine::new(
-            config,
-            backend,
-            logger.clone(),
-            Arc::new(EventBus::new()),
-            "test".into(),
-        )));
 
         let request =
             json!({"jsonrpc": "2.0", "id": 1, "method": "logs_tail", "params": {"n": 10}});

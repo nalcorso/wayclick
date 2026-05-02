@@ -271,6 +271,10 @@ fn default_drag_duration_ms() -> u32 {
 /// almost certainly a config mistake (e.g. units confusion between ms and seconds).
 pub const MAX_INTERVAL_MS: u32 = 3_600_000;
 
+/// Name of the implicit default layer; always present in `available_layers`
+/// and used as the engine's initial `current_layer`.
+pub const BASE_LAYER: &str = "base";
+
 impl ActionConfig {
     pub fn type_name(&self) -> &str {
         match self {
