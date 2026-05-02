@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // Application state for the wayclick-playground, integrating IPC connection with
 // the macroquad main loop via mpsc channels.
 
@@ -121,10 +122,7 @@ impl AppState {
                     if let Some(entry) = self.triggers.iter_mut().find(|t| t.info.id == id) {
                         entry.live_active = false;
                     }
-                    events.push(InputEvent::TriggerFired {
-                        id,
-                        active: false,
-                    });
+                    events.push(InputEvent::TriggerFired { id, active: false });
                 }
 
                 IpcMessage::RawInput { code, value, .. } => {
@@ -171,10 +169,7 @@ impl AppState {
                         .as_ref()
                         .map(|w| w.app_id.clone())
                         .unwrap_or_default();
-                    let title = window
-                        .as_ref()
-                        .map(|w| w.title.clone())
-                        .unwrap_or_default();
+                    let title = window.as_ref().map(|w| w.title.clone()).unwrap_or_default();
                     let process_name = window.as_ref().and_then(|w| w.process_name.clone());
                     let xwayland = window.as_ref().map(|w| w.xwayland).unwrap_or(false);
                     self.focused_window = window;

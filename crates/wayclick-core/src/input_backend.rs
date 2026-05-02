@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::config::{MouseButton, ScrollDirection};
 use crate::logger::Logger;
 use crate::MutexExt;
@@ -149,7 +150,9 @@ impl InputBackend for MockBackend {
     }
 
     fn click(&self, button: MouseButton) -> Result<(), BackendError> {
-        self.calls.lock_or_recover().push(BackendCall::Click(button));
+        self.calls
+            .lock_or_recover()
+            .push(BackendCall::Click(button));
         Ok(())
     }
 

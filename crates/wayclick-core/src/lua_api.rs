@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::config::*;
 use crate::logger::Logger;
 use mlua::prelude::*;
@@ -1049,54 +1050,54 @@ fn char_to_key_us_qwerty(c: char) -> Option<(&'static str, u32, bool)> {
         'Z' => Some(("KEY_Z", 44, true)),
         // Digits
         '0' => Some(("KEY_0", 11, false)),
-        '1' => Some(("KEY_1",  2, false)),
-        '2' => Some(("KEY_2",  3, false)),
-        '3' => Some(("KEY_3",  4, false)),
-        '4' => Some(("KEY_4",  5, false)),
-        '5' => Some(("KEY_5",  6, false)),
-        '6' => Some(("KEY_6",  7, false)),
-        '7' => Some(("KEY_7",  8, false)),
-        '8' => Some(("KEY_8",  9, false)),
+        '1' => Some(("KEY_1", 2, false)),
+        '2' => Some(("KEY_2", 3, false)),
+        '3' => Some(("KEY_3", 4, false)),
+        '4' => Some(("KEY_4", 5, false)),
+        '5' => Some(("KEY_5", 6, false)),
+        '6' => Some(("KEY_6", 7, false)),
+        '7' => Some(("KEY_7", 8, false)),
+        '8' => Some(("KEY_8", 9, false)),
         '9' => Some(("KEY_9", 10, false)),
         // Shifted digits
-        '!' => Some(("KEY_1",  2, true)),
-        '@' => Some(("KEY_2",  3, true)),
-        '#' => Some(("KEY_3",  4, true)),
-        '$' => Some(("KEY_4",  5, true)),
-        '%' => Some(("KEY_5",  6, true)),
-        '^' => Some(("KEY_6",  7, true)),
-        '&' => Some(("KEY_7",  8, true)),
-        '*' => Some(("KEY_8",  9, true)),
+        '!' => Some(("KEY_1", 2, true)),
+        '@' => Some(("KEY_2", 3, true)),
+        '#' => Some(("KEY_3", 4, true)),
+        '$' => Some(("KEY_4", 5, true)),
+        '%' => Some(("KEY_5", 6, true)),
+        '^' => Some(("KEY_6", 7, true)),
+        '&' => Some(("KEY_7", 8, true)),
+        '*' => Some(("KEY_8", 9, true)),
         '(' => Some(("KEY_9", 10, true)),
         ')' => Some(("KEY_0", 11, true)),
         // Punctuation (unshifted)
-        ' '  => Some(("KEY_SPACE",      57, false)),
-        '-'  => Some(("KEY_MINUS",      12, false)),
-        '='  => Some(("KEY_EQUAL",      13, false)),
-        '['  => Some(("KEY_LEFTBRACE",  26, false)),
-        ']'  => Some(("KEY_RIGHTBRACE", 27, false)),
-        '\\' => Some(("KEY_BACKSLASH",  43, false)),
-        ';'  => Some(("KEY_SEMICOLON",  39, false)),
+        ' ' => Some(("KEY_SPACE", 57, false)),
+        '-' => Some(("KEY_MINUS", 12, false)),
+        '=' => Some(("KEY_EQUAL", 13, false)),
+        '[' => Some(("KEY_LEFTBRACE", 26, false)),
+        ']' => Some(("KEY_RIGHTBRACE", 27, false)),
+        '\\' => Some(("KEY_BACKSLASH", 43, false)),
+        ';' => Some(("KEY_SEMICOLON", 39, false)),
         '\'' => Some(("KEY_APOSTROPHE", 40, false)),
-        '`'  => Some(("KEY_GRAVE",      41, false)),
-        ','  => Some(("KEY_COMMA",      51, false)),
-        '.'  => Some(("KEY_DOT",        52, false)),
-        '/'  => Some(("KEY_SLASH",      53, false)),
+        '`' => Some(("KEY_GRAVE", 41, false)),
+        ',' => Some(("KEY_COMMA", 51, false)),
+        '.' => Some(("KEY_DOT", 52, false)),
+        '/' => Some(("KEY_SLASH", 53, false)),
         // Punctuation (shifted)
-        '_' => Some(("KEY_MINUS",      12, true)),
-        '+' => Some(("KEY_EQUAL",      13, true)),
-        '{' => Some(("KEY_LEFTBRACE",  26, true)),
+        '_' => Some(("KEY_MINUS", 12, true)),
+        '+' => Some(("KEY_EQUAL", 13, true)),
+        '{' => Some(("KEY_LEFTBRACE", 26, true)),
         '}' => Some(("KEY_RIGHTBRACE", 27, true)),
-        '|' => Some(("KEY_BACKSLASH",  43, true)),
-        ':' => Some(("KEY_SEMICOLON",  39, true)),
+        '|' => Some(("KEY_BACKSLASH", 43, true)),
+        ':' => Some(("KEY_SEMICOLON", 39, true)),
         '"' => Some(("KEY_APOSTROPHE", 40, true)),
-        '~' => Some(("KEY_GRAVE",      41, true)),
-        '<' => Some(("KEY_COMMA",      51, true)),
-        '>' => Some(("KEY_DOT",        52, true)),
-        '?' => Some(("KEY_SLASH",      53, true)),
+        '~' => Some(("KEY_GRAVE", 41, true)),
+        '<' => Some(("KEY_COMMA", 51, true)),
+        '>' => Some(("KEY_DOT", 52, true)),
+        '?' => Some(("KEY_SLASH", 53, true)),
         // Special keys
         '\n' => Some(("KEY_ENTER", 28, false)),
-        '\t' => Some(("KEY_TAB",   15, false)),
+        '\t' => Some(("KEY_TAB", 15, false)),
         _ => None,
     }
 }
@@ -1129,7 +1130,9 @@ fn parse_action_table(table: &LuaTable, depth: usize) -> Result<ActionConfig, Lu
             let duration_ms: Option<u32> = table.get("_duration_ms").ok();
             let jitter_ms: u32 = table.get("_jitter_ms")?;
             let modifier_names: Vec<String> = match table.get::<LuaTable>("_modifier_names") {
-                Ok(t) => t.sequence_values::<String>().collect::<Result<Vec<_>, _>>()?,
+                Ok(t) => t
+                    .sequence_values::<String>()
+                    .collect::<Result<Vec<_>, _>>()?,
                 Err(_) => Vec::new(),
             };
             let modifier_codes: Vec<u32> = match table.get::<LuaTable>("_modifier_codes") {
@@ -1151,7 +1154,9 @@ fn parse_action_table(table: &LuaTable, depth: usize) -> Result<ActionConfig, Lu
             let key_code: u32 = table.get("_key_code")?;
             let hold_ms: u32 = table.get("_hold_ms").unwrap_or(0);
             let modifier_names: Vec<String> = match table.get::<LuaTable>("_modifier_names") {
-                Ok(t) => t.sequence_values::<String>().collect::<Result<Vec<_>, _>>()?,
+                Ok(t) => t
+                    .sequence_values::<String>()
+                    .collect::<Result<Vec<_>, _>>()?,
                 Err(_) => Vec::new(),
             };
             let modifier_codes: Vec<u32> = match table.get::<LuaTable>("_modifier_codes") {
@@ -3080,7 +3085,10 @@ mod tests {
             "#,
         );
         let result = load_config(&path, &test_logger());
-        assert!(result.is_err(), "Keystroke should be rejected in toggle mode");
+        assert!(
+            result.is_err(),
+            "Keystroke should be rejected in toggle mode"
+        );
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("keystroke") || err.contains("oneshot"),
@@ -3194,9 +3202,16 @@ mod tests {
             "#,
         );
         let result = load_config(&path, &test_logger());
-        assert!(result.is_err(), "swallow=true without exclusive=true should error");
+        assert!(
+            result.is_err(),
+            "swallow=true without exclusive=true should error"
+        );
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("exclusive"), "Error should mention exclusive: {}", err);
+        assert!(
+            err.contains("exclusive"),
+            "Error should mention exclusive: {}",
+            err
+        );
     }
 
     #[test]
@@ -3277,8 +3292,10 @@ mod tests {
             "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            ref actions,
+        } = &config.triggers[0].action
         else {
             panic!("expected Sequence action");
         };
@@ -3305,8 +3322,10 @@ mod tests {
             "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            ref actions,
+        } = &config.triggers[0].action
         else {
             panic!("expected Sequence action");
         };
@@ -3353,8 +3372,10 @@ mod tests {
             "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            ref actions,
+        } = &config.triggers[0].action
         else {
             panic!("expected Sequence action");
         };
@@ -3391,8 +3412,10 @@ mod tests {
             "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            ref actions,
+        } = &config.triggers[0].action
         else {
             panic!("expected Sequence action");
         };
@@ -3424,8 +3447,10 @@ mod tests {
              })\n",
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            ref actions,
+        } = &config.triggers[0].action
         else {
             panic!("expected Sequence action");
         };
@@ -3458,8 +3483,10 @@ mod tests {
             "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            ref actions,
+        } = &config.triggers[0].action
         else {
             panic!("expected Sequence action");
         };
@@ -3487,13 +3514,17 @@ mod tests {
             "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            ref actions,
+        } = &config.triggers[0].action
         else {
             panic!("expected Sequence action");
         };
         assert_eq!(actions.len(), 3);
-        assert!(actions.iter().all(|a| matches!(a, ActionConfig::Keystroke { .. })));
+        assert!(actions
+            .iter()
+            .all(|a| matches!(a, ActionConfig::Keystroke { .. })));
     }
 
     #[test]
@@ -3512,8 +3543,10 @@ mod tests {
             "#,
         );
         let config = load_config(&path, &test_logger()).unwrap();
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, ref actions } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            ref actions,
+        } = &config.triggers[0].action
         else {
             panic!("expected Sequence action");
         };
@@ -3571,8 +3604,10 @@ mod tests {
         );
         let config = load_config(&path, &test_logger()).unwrap();
         assert_eq!(config.triggers[0].id, "hideout");
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, actions: ref outer } =
-            &config.triggers[0].action
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            actions: ref outer,
+        } = &config.triggers[0].action
         else {
             panic!("expected outer Sequence");
         };
@@ -3580,7 +3615,10 @@ mod tests {
         assert_eq!(outer.len(), 3);
 
         // Middle element is the type_text expansion: sequence of 8 chars ("/hideout")
-        let ActionConfig::Composite { mode: CompositeMode::Sequence, actions: ref inner } = &outer[1]
+        let ActionConfig::Composite {
+            mode: CompositeMode::Sequence,
+            actions: ref inner,
+        } = &outer[1]
         else {
             panic!("expected inner Sequence from type_text");
         };

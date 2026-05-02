@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 #![allow(clippy::too_many_arguments)]
 
 pub mod shaders;
@@ -519,17 +520,8 @@ pub fn draw_focus_widget(
 ) -> bool {
     draw_rectangle(x, y, w, h, colors::FOCUS_WIDGET_BG);
 
-    let header_clicked = draw_section_header(
-        x,
-        y,
-        w,
-        "FOCUSED WINDOW",
-        None,
-        expanded,
-        mx,
-        my,
-        font,
-    );
+    let header_clicked =
+        draw_section_header(x, y, w, "FOCUSED WINDOW", None, expanded, mx, my, font);
 
     if !expanded {
         return header_clicked;
@@ -608,8 +600,7 @@ pub fn draw_event_log(
 ) -> bool {
     draw_rectangle(x, y, w, h, colors::LOG_BG);
 
-    let header_clicked =
-        draw_section_header(x, y, w, "EVENT LOG", None, expanded, mx, my, font);
+    let header_clicked = draw_section_header(x, y, w, "EVENT LOG", None, expanded, mx, my, font);
 
     if !expanded {
         return header_clicked;

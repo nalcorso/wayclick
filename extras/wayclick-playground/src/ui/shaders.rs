@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use macroquad::prelude::*;
 
 /// Animated background grid shader — subtle pulsing grid lines with

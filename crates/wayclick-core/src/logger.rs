@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::MutexExt;
 use std::collections::VecDeque;
 use std::fmt;

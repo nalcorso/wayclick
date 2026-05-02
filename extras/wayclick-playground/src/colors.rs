@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use macroquad::prelude::Color;
 
 // Background

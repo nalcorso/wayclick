@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Hyprland compositor focus backend.
 //!
 //! Uses Hyprland's native IPC sockets:
@@ -122,8 +123,7 @@ fn listen_events(
         let line = match line {
             Ok(l) => l,
             Err(e)
-                if e.kind() == io::ErrorKind::WouldBlock
-                    || e.kind() == io::ErrorKind::TimedOut =>
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
             {
                 continue;
             }
@@ -145,7 +145,10 @@ fn listen_events(
         }
     }
 
-    Err(io::Error::new(io::ErrorKind::UnexpectedEof, "socket closed"))
+    Err(io::Error::new(
+        io::ErrorKind::UnexpectedEof,
+        "socket closed",
+    ))
 }
 
 /// Sends `j/activewindow` to the command socket and parses the JSON response.

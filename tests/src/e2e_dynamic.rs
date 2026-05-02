@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! E2E tests for dynamic trigger lifecycle: registration, execution, ownership, and cleanup.
 
 #[cfg(test)]
@@ -31,7 +32,10 @@ mod tests {
         let response = daemon.ipc("list_triggers", None);
         let triggers = response["result"].as_array().unwrap();
         let found = triggers.iter().find(|t| t["id"] == "vis_test");
-        assert!(found.is_some(), "Dynamic trigger must appear in list_triggers");
+        assert!(
+            found.is_some(),
+            "Dynamic trigger must appear in list_triggers"
+        );
         assert!(
             found.unwrap()["dynamic"].as_bool().unwrap_or(false),
             "Trigger should be marked dynamic:true"
@@ -151,13 +155,19 @@ mod tests {
             let snaps = engine.lock().unwrap().triggers_snapshot();
             !snaps.iter().any(|t| t.id == "cleanup_test")
         });
-        assert!(cleaned, "Trigger should be removed from engine after disconnect");
+        assert!(
+            cleaned,
+            "Trigger should be removed from engine after disconnect"
+        );
 
         // Verify the worker is stopped: count should be stable
         let count1 = backend_calls.lock().unwrap().len();
         std::thread::sleep(Duration::from_millis(50));
         let count2 = backend_calls.lock().unwrap().len();
-        assert_eq!(count1, count2, "Backend call count should not increase after cleanup");
+        assert_eq!(
+            count1, count2,
+            "Backend call count should not increase after cleanup"
+        );
 
         daemon.teardown();
     }
@@ -223,8 +233,8 @@ mod tests {
     #[test]
     fn test_register_dynamic_trigger_succeeds_with_static_device_bindings() {
         use wayclick_core::config::{
-            ActionConfig, Binding, ButtonBinding, DeviceBinding, DeviceMatch,
-            TriggerBinding, TriggerEdge, TriggerMode,
+            ActionConfig, Binding, ButtonBinding, DeviceBinding, DeviceMatch, TriggerBinding,
+            TriggerEdge, TriggerMode,
         };
 
         let static_trigger = TriggerBinding {

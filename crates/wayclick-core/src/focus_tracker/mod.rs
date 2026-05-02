@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Focused window detection for Wayclick.
 //!
 //! Auto-detects the available compositor backend (Hyprland, Sway, or None) and tracks

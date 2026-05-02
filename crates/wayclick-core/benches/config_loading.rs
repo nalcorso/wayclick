@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Benchmarks for Lua config parsing and loading.
 //!
 //! Measures the cost of parsing Lua configurations of varying complexity.

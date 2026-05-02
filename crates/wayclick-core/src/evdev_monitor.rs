@@ -1,12 +1,13 @@
+// SPDX-License-Identifier: MIT
 // EvdevMonitor — coordinates device monitoring threads, hotplug, and trigger dispatch.
 
 use crate::config::{Binding, DeviceBinding, TriggerEdge};
 use crate::engine::{with_engine_events, Engine};
-use crate::event_bus::{Event, EventBus};
 use crate::evdev_source::{
     self, DeviceInfo, EvdevSource, InputSource, EV_ABS, EV_KEY, EV_REL, EV_SYN, REL_HWHEEL,
     REL_WHEEL, SYN_DROPPED, SYN_REPORT,
 };
+use crate::event_bus::{Event, EventBus};
 use crate::input_backend::InputBackend;
 use crate::logger::Logger;
 use crate::MutexExt;
@@ -214,14 +215,17 @@ fn spawn_device_thread(params: DeviceThreadParams) -> JoinHandle<()> {
         };
 
         let device_name = source.device_info().name.clone();
-        logger.debug(format!(
-            "Monitoring device '{}' at {:?}",
-            device_name, path
-        ));
+        logger.debug(format!("Monitoring device '{}' at {:?}", device_name, path));
 
         let forward_backend = if exclusive { backend } else { None };
-        let mut processor =
-            DeviceProcessor::new(binding, engine, logger.clone(), forward_backend, device_name, event_bus);
+        let mut processor = DeviceProcessor::new(
+            binding,
+            engine,
+            logger.clone(),
+            forward_backend,
+            device_name,
+            event_bus,
+        );
 
         while running.load(Ordering::SeqCst) {
             match source.poll_events(Duration::from_millis(100)) {
@@ -349,11 +353,7 @@ impl DeviceProcessor {
                             } else {
                                 (event.value, 0)
                             };
-                            bus.publish(&Event::scroll_received(
-                                dx,
-                                dy,
-                                self.device_name.clone(),
-                            ));
+                            bus.publish(&Event::scroll_received(dx, dy, self.device_name.clone()));
                         }
                     }
                     self.pending_frame.push(event.clone());
@@ -399,16 +399,27 @@ impl DeviceProcessor {
                                     continue;
                                 }
                             }
-                            let code_name = bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
+                            let code_name =
+                                bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
                             match event.value {
                                 1 if bb.on == TriggerEdge::Press => {
                                     self.fire_trigger(&bb.trigger_id, code_name, true, "firing");
                                 }
                                 0 if bb.on == TriggerEdge::Press => {
-                                    self.fire_trigger(&bb.trigger_id, code_name, false, "deactivating");
+                                    self.fire_trigger(
+                                        &bb.trigger_id,
+                                        code_name,
+                                        false,
+                                        "deactivating",
+                                    );
                                 }
                                 0 if bb.on == TriggerEdge::Release => {
-                                    self.fire_trigger(&bb.trigger_id, code_name, true, "firing on-release");
+                                    self.fire_trigger(
+                                        &bb.trigger_id,
+                                        code_name,
+                                        true,
+                                        "firing on-release",
+                                    );
                                 }
                                 _ => {}
                             }
@@ -469,10 +480,10 @@ impl DeviceProcessor {
                                     "Button {} pressed, claiming trigger '{}'",
                                     code_name, bb.trigger_id
                                 ));
-                                let triggered =
-                                    with_engine_events(&self.engine, |eng| {
-                                        eng.trigger_event(&bb.trigger_id, true).is_ok()
-                                    });                                if triggered {
+                                let triggered = with_engine_events(&self.engine, |eng| {
+                                    eng.trigger_event(&bb.trigger_id, true).is_ok()
+                                });
+                                if triggered {
                                     self.active_claims.insert(binding_idx, bb.swallow);
                                     if bb.swallow {
                                         for &c in &bb.codes {
@@ -488,7 +499,7 @@ impl DeviceProcessor {
 
                         // on=Release bindings: fire when this code is released and all other
                         // chord codes are still held.
-                        for (_, binding_item) in self.binding.bindings.iter().enumerate() {
+                        for binding_item in self.binding.bindings.iter() {
                             if let Binding::Button(ref bb) = binding_item {
                                 if bb.on != TriggerEdge::Release {
                                     continue;
@@ -514,7 +525,12 @@ impl DeviceProcessor {
                                 let code_name =
                                     bb.code_names.first().map(|s| s.as_str()).unwrap_or("?");
                                 // swallow=true is forbidden for on=Release (validated at load time)
-                                self.fire_trigger(&bb.trigger_id, code_name, true, "firing on-release");
+                                self.fire_trigger(
+                                    &bb.trigger_id,
+                                    code_name,
+                                    true,
+                                    "firing on-release",
+                                );
                             }
                         }
 
@@ -578,9 +594,7 @@ impl DeviceProcessor {
                                 suppress_scroll_indices.insert(event_idx);
                                 // Also suppress the corresponding hi-res event in this frame
                                 let hi_res_code = match event.code {
-                                    evdev_source::REL_WHEEL => {
-                                        Some(evdev_source::REL_WHEEL_HI_RES)
-                                    }
+                                    evdev_source::REL_WHEEL => Some(evdev_source::REL_WHEEL_HI_RES),
                                     evdev_source::REL_HWHEEL => {
                                         Some(evdev_source::REL_HWHEEL_HI_RES)
                                     }
@@ -661,8 +675,8 @@ mod tests {
     use super::*;
     use crate::config::*;
     use crate::engine::Engine;
-    use crate::event_bus::EventBus;
     use crate::evdev_source::InputEvent;
+    use crate::event_bus::EventBus;
     use crate::input_backend::MockBackend;
     use crate::logger::LogLevel;
     use std::path::PathBuf;
@@ -849,7 +863,14 @@ mod tests {
         logger: Arc<Logger>,
         forward_backend: Option<Arc<dyn InputBackend>>,
     ) -> DeviceProcessor {
-        DeviceProcessor::new(binding, engine, logger, forward_backend, "test-device".to_string(), None)
+        DeviceProcessor::new(
+            binding,
+            engine,
+            logger,
+            forward_backend,
+            "test-device".to_string(),
+            None,
+        )
     }
 
     #[test]
@@ -1620,7 +1641,9 @@ mod tests {
         exclusive: bool,
     ) -> DeviceBinding {
         DeviceBinding {
-            device_match: DeviceMatch::ByName { contains: "test".into() },
+            device_match: DeviceMatch::ByName {
+                contains: "test".into(),
+            },
             bindings: vec![Binding::Button(ButtonBinding {
                 codes: vec![code],
                 code_names: vec![code_name.into()],
@@ -1638,50 +1661,90 @@ mod tests {
     #[test]
     fn test_swallow_false_forwards_button_press_and_release() {
         let (engine, _, logger) = make_oneshot_engine("test_trigger");
-        let binding = button_binding(BTN_EXTRA, "BTN_EXTRA", "test_trigger", false, TriggerEdge::Press, true);
+        let binding = button_binding(
+            BTN_EXTRA,
+            "BTN_EXTRA",
+            "test_trigger",
+            false,
+            TriggerEdge::Press,
+            true,
+        );
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
         let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 1,
+            },
             syn_report(),
         ]);
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 0,
+            },
             syn_report(),
         ]);
 
         let calls = fwd_calls.lock_or_recover();
-        assert_eq!(calls.len(), 2, "Both press and release should be forwarded (swallow=false)");
+        assert_eq!(
+            calls.len(),
+            2,
+            "Both press and release should be forwarded (swallow=false)"
+        );
     }
 
     #[test]
     fn test_swallow_true_suppresses_button_press_and_release() {
         let (engine, _, logger) = make_oneshot_engine("test_trigger");
-        let binding = button_binding(BTN_EXTRA, "BTN_EXTRA", "test_trigger", true, TriggerEdge::Press, true);
+        let binding = button_binding(
+            BTN_EXTRA,
+            "BTN_EXTRA",
+            "test_trigger",
+            true,
+            TriggerEdge::Press,
+            true,
+        );
         let fwd_backend = MockBackend::new();
         let fwd_calls = fwd_backend.calls_clone();
         let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 1,
+            },
             syn_report(),
         ]);
         proc.process_events(&[
-            InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 },
+            InputEvent {
+                event_type: EV_KEY,
+                code: BTN_EXTRA,
+                value: 0,
+            },
             syn_report(),
         ]);
 
         let calls = fwd_calls.lock_or_recover();
-        assert!(calls.is_empty(), "swallow=true should suppress both press and release, got {:?}", *calls);
+        assert!(
+            calls.is_empty(),
+            "swallow=true should suppress both press and release, got {:?}",
+            *calls
+        );
     }
 
     #[test]
     fn test_swallow_false_forwards_scroll() {
         let (engine, _, logger) = make_oneshot_engine("scroll_click");
         let binding = DeviceBinding {
-            device_match: DeviceMatch::ByName { contains: "test".into() },
+            device_match: DeviceMatch::ByName {
+                contains: "test".into(),
+            },
             bindings: vec![Binding::Scroll(crate::config::ScrollBinding {
                 direction: crate::config::ScrollDirection::Up,
                 trigger_id: "scroll_click".into(),
@@ -1695,12 +1758,21 @@ mod tests {
         let mut proc = make_processor(binding, engine, logger, Some(Arc::new(fwd_backend)));
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: evdev_source::REL_WHEEL, value: 1 },
+            InputEvent {
+                event_type: EV_REL,
+                code: evdev_source::REL_WHEEL,
+                value: 1,
+            },
             syn_report(),
         ]);
 
         let calls = fwd_calls.lock_or_recover();
-        assert_eq!(calls.len(), 1, "swallow=false scroll should be forwarded, got {:?}", *calls);
+        assert_eq!(
+            calls.len(),
+            1,
+            "swallow=false scroll should be forwarded, got {:?}",
+            *calls
+        );
     }
 
     #[test]
@@ -1730,15 +1802,33 @@ mod tests {
         with_engine_events(&engine, |eng| eng.set_enabled(true));
 
         // on=Release, swallow=false (validated: swallow+Release forbidden)
-        let binding = button_binding(BTN_EXTRA, "BTN_EXTRA", "release_trigger", false, TriggerEdge::Release, false);
+        let binding = button_binding(
+            BTN_EXTRA,
+            "BTN_EXTRA",
+            "release_trigger",
+            false,
+            TriggerEdge::Release,
+            false,
+        );
         let mut proc = make_processor(binding, engine, logger, None);
 
         // Press: trigger should NOT fire
-        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 }]);
-        assert!(trigger_calls.lock_or_recover().is_empty(), "Trigger should not fire on press with on=release");
+        proc.process_events(&[InputEvent {
+            event_type: EV_KEY,
+            code: BTN_EXTRA,
+            value: 1,
+        }]);
+        assert!(
+            trigger_calls.lock_or_recover().is_empty(),
+            "Trigger should not fire on press with on=release"
+        );
 
         // Release: trigger SHOULD fire
-        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 }]);
+        proc.process_events(&[InputEvent {
+            event_type: EV_KEY,
+            code: BTN_EXTRA,
+            value: 0,
+        }]);
         // Since it's NoOp, no backend calls — but we can verify via engine state
         // (OneShot NoOp: no side effects in backend, but trigger_event was called)
         // The test passes if no panic and no press-time fire. Engine didn't error on release either.
@@ -1772,7 +1862,9 @@ mod tests {
         const BTN_SIDE: u16 = 0x113;
 
         let binding = DeviceBinding {
-            device_match: DeviceMatch::ByName { contains: "test".into() },
+            device_match: DeviceMatch::ByName {
+                contains: "test".into(),
+            },
             bindings: vec![Binding::Button(ButtonBinding {
                 codes: vec![BTN_SIDE, BTN_EXTRA],
                 code_names: vec!["BTN_SIDE".into(), "BTN_EXTRA".into()],
@@ -1788,18 +1880,34 @@ mod tests {
         let mut proc = make_processor(binding, engine.clone(), logger, None);
 
         // Press only BTN_SIDE — chord should not fire
-        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_SIDE, value: 1 }]);
+        proc.process_events(&[InputEvent {
+            event_type: EV_KEY,
+            code: BTN_SIDE,
+            value: 1,
+        }]);
         // Verify engine received trigger_event for chord: it hasn't (BTN_EXTRA not pressed)
         // We check indirectly: engine is in OneShot NoOp state, so if trigger fired it would
         // have been Ok(()). We verify by pressing the second code next.
 
         // Press BTN_EXTRA — now both held, chord should fire
-        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 }]);
+        proc.process_events(&[InputEvent {
+            event_type: EV_KEY,
+            code: BTN_EXTRA,
+            value: 1,
+        }]);
         // If chord detection works, trigger_event("chord_trigger", true) was called exactly once.
         // No assert on backend calls since action is NoOp, but we verify no panic/double-fire:
         // Press BTN_EXTRA again should NOT re-fire (already claimed):
-        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 0 }]);
-        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_EXTRA, value: 1 }]);
+        proc.process_events(&[InputEvent {
+            event_type: EV_KEY,
+            code: BTN_EXTRA,
+            value: 0,
+        }]);
+        proc.process_events(&[InputEvent {
+            event_type: EV_KEY,
+            code: BTN_EXTRA,
+            value: 1,
+        }]);
         // After release + re-press, chord fires again (BTN_SIDE still held, BTN_EXTRA re-pressed)
     }
 
@@ -1838,7 +1946,9 @@ mod tests {
         const BTN_SIDE: u16 = 0x113;
 
         let binding = DeviceBinding {
-            device_match: DeviceMatch::ByName { contains: "test".into() },
+            device_match: DeviceMatch::ByName {
+                contains: "test".into(),
+            },
             bindings: vec![Binding::Button(ButtonBinding {
                 codes: vec![BTN_SIDE, BTN_EXTRA],
                 code_names: vec!["BTN_SIDE".into(), "BTN_EXTRA".into()],
@@ -1854,7 +1964,11 @@ mod tests {
         let mut proc = make_processor(binding, engine, logger, None);
 
         // Press only one key of the chord — trigger must NOT fire
-        proc.process_events(&[InputEvent { event_type: EV_KEY, code: BTN_SIDE, value: 1 }]);
+        proc.process_events(&[InputEvent {
+            event_type: EV_KEY,
+            code: BTN_SIDE,
+            value: 1,
+        }]);
         thread::sleep(Duration::from_millis(20));
         assert!(
             trigger_calls.lock_or_recover().is_empty(),
@@ -1865,9 +1979,18 @@ mod tests {
     // ─── Scroll event bus publishing ──────────────────────────────────────────
 
     fn make_processor_with_bus(bus: Arc<EventBus>) -> DeviceProcessor {
-        let binding = make_binding(DeviceMatch::ByName { contains: "test".into() });
+        let binding = make_binding(DeviceMatch::ByName {
+            contains: "test".into(),
+        });
         let (engine, _, logger) = make_oneshot_engine("test_trigger");
-        DeviceProcessor::new(binding, engine, logger, None, "test-device".to_string(), Some(bus))
+        DeviceProcessor::new(
+            binding,
+            engine,
+            logger,
+            None,
+            "test-device".to_string(),
+            Some(bus),
+        )
     }
 
     #[test]
@@ -1877,14 +2000,32 @@ mod tests {
         let mut proc = make_processor_with_bus(bus);
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_WHEEL, value: 1 },
-            InputEvent { event_type: EV_SYN, code: SYN_REPORT, value: 0 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_WHEEL,
+                value: 1,
+            },
+            InputEvent {
+                event_type: EV_SYN,
+                code: SYN_REPORT,
+                value: 0,
+            },
         ]);
 
-        let event = rx.recv_timeout(Duration::from_millis(200)).expect("ScrollReceived not published");
+        let event = rx
+            .recv_timeout(Duration::from_millis(200))
+            .expect("ScrollReceived not published");
         assert!(
-            matches!(event, Event::ScrollReceived { delta_x: 0, delta_y: 1, .. }),
-            "Unexpected event: {:?}", event
+            matches!(
+                event,
+                Event::ScrollReceived {
+                    delta_x: 0,
+                    delta_y: 1,
+                    ..
+                }
+            ),
+            "Unexpected event: {:?}",
+            event
         );
     }
 
@@ -1895,14 +2036,32 @@ mod tests {
         let mut proc = make_processor_with_bus(bus);
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_HWHEEL, value: -1 },
-            InputEvent { event_type: EV_SYN, code: SYN_REPORT, value: 0 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_HWHEEL,
+                value: -1,
+            },
+            InputEvent {
+                event_type: EV_SYN,
+                code: SYN_REPORT,
+                value: 0,
+            },
         ]);
 
-        let event = rx.recv_timeout(Duration::from_millis(200)).expect("ScrollReceived not published");
+        let event = rx
+            .recv_timeout(Duration::from_millis(200))
+            .expect("ScrollReceived not published");
         assert!(
-            matches!(event, Event::ScrollReceived { delta_x: -1, delta_y: 0, .. }),
-            "Unexpected event: {:?}", event
+            matches!(
+                event,
+                Event::ScrollReceived {
+                    delta_x: -1,
+                    delta_y: 0,
+                    ..
+                }
+            ),
+            "Unexpected event: {:?}",
+            event
         );
     }
 
@@ -1914,12 +2073,28 @@ mod tests {
         let mut proc = make_processor_with_bus(bus);
 
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_WHEEL_HI_RES, value: 120 },
-            InputEvent { event_type: EV_SYN, code: SYN_REPORT, value: 0 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_WHEEL_HI_RES,
+                value: 120,
+            },
+            InputEvent {
+                event_type: EV_SYN,
+                code: SYN_REPORT,
+                value: 0,
+            },
         ]);
         proc.process_events(&[
-            InputEvent { event_type: EV_REL, code: REL_HWHEEL_HI_RES, value: -120 },
-            InputEvent { event_type: EV_SYN, code: SYN_REPORT, value: 0 },
+            InputEvent {
+                event_type: EV_REL,
+                code: REL_HWHEEL_HI_RES,
+                value: -120,
+            },
+            InputEvent {
+                event_type: EV_SYN,
+                code: SYN_REPORT,
+                value: 0,
+            },
         ]);
 
         assert!(

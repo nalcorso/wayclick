@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Benchmarks for IPC frame encoding/decoding.
 //!
 //! Measures serialization overhead for various payload sizes and

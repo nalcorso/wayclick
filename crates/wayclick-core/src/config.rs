@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
@@ -247,12 +248,24 @@ pub enum ActionConfig {
     NoOp,
 }
 
-fn default_auto_click_interval_ms() -> u32 { 50 }
-fn default_key_press_interval_ms() -> u32 { 50 }
-fn default_scroll_interval_ms() -> u32 { 100 }
-fn default_mouse_move_interval_ms() -> u32 { 16 }
-fn default_scroll_amount() -> i32 { 3 }
-fn default_drag_duration_ms() -> u32 { 500 }
+fn default_auto_click_interval_ms() -> u32 {
+    50
+}
+fn default_key_press_interval_ms() -> u32 {
+    50
+}
+fn default_scroll_interval_ms() -> u32 {
+    100
+}
+fn default_mouse_move_interval_ms() -> u32 {
+    16
+}
+fn default_scroll_amount() -> i32 {
+    3
+}
+fn default_drag_duration_ms() -> u32 {
+    500
+}
 
 /// Maximum permitted interval for repeating actions (1 hour). Values above this are
 /// almost certainly a config mistake (e.g. units confusion between ms and seconds).
@@ -731,9 +744,7 @@ pub fn validate_config(config: &Config) -> Result<(), Vec<ConfigError>> {
 
         // Oneshot-only actions (Keystroke, ClickAt, Drag, MouseMoveAbsolute, SetLayer) must not
         // be the root action of a Toggle or Hold trigger.
-        if trigger.action.is_oneshot_only()
-            && !matches!(trigger.mode, TriggerMode::OneShot)
-        {
+        if trigger.action.is_oneshot_only() && !matches!(trigger.mode, TriggerMode::OneShot) {
             errors.push(ConfigError::Validation(format!(
                 "trigger '{}': action type '{}' can only be used with mode 'oneshot'",
                 trigger.id,
@@ -754,10 +765,7 @@ pub fn default_socket_path() -> PathBuf {
     if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
         PathBuf::from(runtime_dir).join("wayclick.sock")
     } else {
-        PathBuf::from("/tmp").join(format!(
-            "wayclick-{}.sock",
-            nix::unistd::getuid().as_raw()
-        ))
+        PathBuf::from("/tmp").join(format!("wayclick-{}.sock", nix::unistd::getuid().as_raw()))
     }
 }
 
@@ -1196,7 +1204,9 @@ mod tests {
             ..Config::default()
         };
         let errs = validate_config(&config).unwrap_err();
-        assert!(errs.iter().any(|e| e.to_string().contains("exceeds maximum")));
+        assert!(errs
+            .iter()
+            .any(|e| e.to_string().contains("exceeds maximum")));
     }
 
     #[test]
@@ -1246,6 +1256,8 @@ mod tests {
             ..Config::default()
         };
         let errs = validate_config(&config).unwrap_err();
-        assert!(errs.iter().any(|e| e.to_string().contains("exceeds maximum")));
+        assert!(errs
+            .iter()
+            .any(|e| e.to_string().contains("exceeds maximum")));
     }
 }

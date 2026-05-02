@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! E2E tests that validate the full IPC→engine→backend path for action execution.
 //! These tests verify the *output* of actions (backend calls) rather than the IPC protocol.
 
@@ -6,9 +7,7 @@ mod tests {
     use std::time::Duration;
 
     use serde_json::json;
-    use wayclick_core::config::{
-        ActionConfig, CompositeMode, Config, TriggerBinding, TriggerMode,
-    };
+    use wayclick_core::config::{ActionConfig, CompositeMode, Config, TriggerBinding, TriggerMode};
     use wayclick_core::engine::with_engine_events;
     use wayclick_core::input_backend::BackendCall;
 
@@ -116,7 +115,10 @@ mod tests {
         // Verify count does not increase further
         std::thread::sleep(Duration::from_millis(50));
         let count_later = backend_calls.lock().unwrap().len();
-        assert_eq!(count_after_stop, count_later, "Count should not increase after toggle-off");
+        assert_eq!(
+            count_after_stop, count_later,
+            "Count should not increase after toggle-off"
+        );
 
         daemon.teardown();
     }
@@ -156,7 +158,10 @@ mod tests {
         let count_after_release = backend_calls.lock().unwrap().len();
         std::thread::sleep(Duration::from_millis(50));
         let count_later = backend_calls.lock().unwrap().len();
-        assert_eq!(count_after_release, count_later, "Count should not increase after release");
+        assert_eq!(
+            count_after_release, count_later,
+            "Count should not increase after release"
+        );
 
         daemon.teardown();
     }
@@ -196,7 +201,11 @@ mod tests {
         daemon.ipc("trigger", Some(json!({"id": "seq"})));
 
         let calls = daemon.backend_calls.lock().unwrap().clone();
-        assert_eq!(calls.len(), 4, "Expected 4 backend calls for 2-keystroke sequence");
+        assert_eq!(
+            calls.len(),
+            4,
+            "Expected 4 backend calls for 2-keystroke sequence"
+        );
         assert_eq!(calls[0], BackendCall::KeyPress(30));
         assert_eq!(calls[1], BackendCall::KeyRelease(30));
         assert_eq!(calls[2], BackendCall::KeyPress(28));

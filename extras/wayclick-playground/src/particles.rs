@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::colors;
 use macroquad::prelude::*;
 

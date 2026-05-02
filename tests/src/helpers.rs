@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -48,8 +49,14 @@ impl TestDaemon {
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("test.sock");
 
-        let server = IpcServer::new(socket_path.clone(), engine.clone(), logger.clone(), event_bus, None)
-            .unwrap();
+        let server = IpcServer::new(
+            socket_path.clone(),
+            engine.clone(),
+            logger.clone(),
+            event_bus,
+            None,
+        )
+        .unwrap();
         let shutdown = server.shutdown_flag();
 
         let handle = thread::spawn(move || {
@@ -129,7 +136,8 @@ pub fn wait_for_event(sock: &mut UnixStream, event_type: &str, timeout: Duration
             Some(r) if r > Duration::ZERO => r,
             _ => return None,
         };
-        sock.set_read_timeout(Some(remaining.max(Duration::from_millis(1)))).unwrap();
+        sock.set_read_timeout(Some(remaining.max(Duration::from_millis(1))))
+            .unwrap();
         match decode_frame(sock) {
             Ok(msg) => {
                 if msg.get("method").and_then(|v| v.as_str()) == Some("event") {

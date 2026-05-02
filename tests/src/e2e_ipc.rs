@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! E2E tests for IPC protocol correctness: error handling, concurrent connections, and limits.
 
 #[cfg(test)]
@@ -80,8 +81,7 @@ mod tests {
 
         assert!(response.get("error").is_some(), "Should return an error");
         assert_eq!(
-            response["error"]["code"],
-            -32602,
+            response["error"]["code"], -32602,
             "Should be invalid-params error"
         );
 

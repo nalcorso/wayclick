@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // IPC client for wayclick-playground.
 // Runs a background std::thread that maintains a connection to the wayclick daemon
 // over its Unix socket, subscribes to all events, and exposes channel APIs to the
@@ -172,10 +173,7 @@ fn parse_status(v: &Value) -> ServiceStatus {
     let r = v.get("result").unwrap_or(v);
     ServiceStatus {
         enabled: r.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false),
-        trigger_count: r
-            .get("trigger_count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0) as usize,
+        trigger_count: r.get("trigger_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
         active_triggers: r
             .get("active_triggers")
             .and_then(|v| v.as_u64())
@@ -219,10 +217,7 @@ fn parse_triggers(v: &Value) -> Vec<TriggerInfo> {
                     .get("user_enabled")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true),
-                dynamic: t
-                    .get("dynamic")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false),
+                dynamic: t.get("dynamic").and_then(|v| v.as_bool()).unwrap_or(false),
             })
         })
         .collect()
@@ -371,7 +366,11 @@ fn run_connection_inner(
     let focus_req = json!({"jsonrpc":"2.0","id":4,"method":"get_focus","params":null});
     let initial_focus = if write_frame(&mut stream, &focus_req) {
         read_one_blocking(&mut stream)
-            .and_then(|v| v.get("result")?.get("window").map(|w| parse_focused_window(Some(w))))
+            .and_then(|v| {
+                v.get("result")?
+                    .get("window")
+                    .map(|w| parse_focused_window(Some(w)))
+            })
             .flatten()
     } else {
         None

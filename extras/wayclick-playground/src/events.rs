@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use macroquad::prelude::*;
 use std::collections::VecDeque;
 
@@ -28,12 +29,18 @@ pub enum InputEvent {
         y: f32,
     },
     /// A wayclick trigger was activated (active=true) or deactivated (active=false).
-    TriggerFired { id: String, active: bool },
+    TriggerFired {
+        id: String,
+        active: bool,
+    },
     /// A service-level status message (connection, layer change, enable/disable).
     ServiceEvent(String),
     /// A raw evdev key/button event sourced from the IPC InputReceived event.
     /// `value`: 1 = press, 0 = release.
-    RawIpcInput { code: u16, value: i32 },
+    RawIpcInput {
+        code: u16,
+        value: i32,
+    },
     /// The focused window changed (sourced from the wayclick daemon).
     FocusChanged {
         app_id: String,

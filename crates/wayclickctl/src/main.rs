@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use clap::{Parser, Subcommand, ValueEnum};
 use std::io;
 use std::path::PathBuf;
@@ -290,7 +291,13 @@ fn main() {
                                 };
                                 println!(
                                     "  {} {:<22} [{:<8}] {:<10} {:<16} {:>5}×",
-                                    if active { "●" } else if !enabled { "✗" } else { "○" },
+                                    if active {
+                                        "●"
+                                    } else if !enabled {
+                                        "✗"
+                                    } else {
+                                        "○"
+                                    },
                                     id,
                                     status,
                                     mode,
@@ -384,7 +391,11 @@ fn run_layer_cycle(socket_path: &std::path::Path, backward: bool) {
     let current = result["current"].as_str().unwrap_or("base").to_string();
     let layers: Vec<String> = result["layers"]
         .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
         .unwrap_or_else(|| vec!["base".to_string()]);
 
     if layers.len() <= 1 {
@@ -394,7 +405,11 @@ fn run_layer_cycle(socket_path: &std::path::Path, backward: bool) {
 
     let idx = layers.iter().position(|l| l == &current).unwrap_or(0);
     let next_idx = if backward {
-        if idx == 0 { layers.len() - 1 } else { idx - 1 }
+        if idx == 0 {
+            layers.len() - 1
+        } else {
+            idx - 1
+        }
     } else {
         (idx + 1) % layers.len()
     };
@@ -618,7 +633,10 @@ fn build_waybar_output(state: &WaybarState, format: &WaybarFormat) -> serde_json
     let tooltip = build_rich_tooltip(state);
 
     let mut classes: Vec<String> = vec!["enabled".to_string()];
-    classes.push(format!("layer-{}", state.layer.to_lowercase().replace(' ', "-")));
+    classes.push(format!(
+        "layer-{}",
+        state.layer.to_lowercase().replace(' ', "-")
+    ));
     if active_count > 0 {
         classes.push("active".to_string());
     } else {
@@ -665,7 +683,10 @@ fn build_rich_tooltip(state: &WaybarState) -> String {
         state.trigger_count, active_count
     );
 
-    let mut trigger_lines = vec!["─────────────────────────────────────".to_string(), trigger_header];
+    let mut trigger_lines = vec![
+        "─────────────────────────────────────".to_string(),
+        trigger_header,
+    ];
 
     if state.triggers.is_empty() {
         trigger_lines.push(" (no triggers configured)".to_string());
@@ -681,11 +702,7 @@ fn build_rich_tooltip(state: &WaybarState) -> String {
             };
             trigger_lines.push(format!(
                 "  {} {:<20} {:<8} {:<16} {:>4}×",
-                dot,
-                t.id,
-                t.mode,
-                t.action,
-                t.activate_count,
+                dot, t.id, t.mode, t.action, t.activate_count,
             ));
         }
     }
@@ -717,11 +734,11 @@ fn build_rich_tooltip(state: &WaybarState) -> String {
     parts.extend(trigger_lines);
     if !state.layers.is_empty() {
         parts.push(String::new());
-        parts.push(format!("─────────────────────────────────────"));
+        parts.push("─────────────────────────────────────".to_string());
         parts.push(format!(" Layers  {}", layer_list));
     }
     parts.push(String::new());
-    parts.push(format!("─────────────────────────────────────"));
+    parts.push("─────────────────────────────────────".to_string());
     parts.push(format!(" {}", footer));
 
     parts.join("\n")
@@ -833,8 +850,7 @@ fn fetch_waybar_snapshot(socket_path: &std::path::Path, format: &WaybarFormat) -
 fn is_timeout_err(e: &wayclick_core::ipc::IpcError) -> bool {
     use wayclick_core::ipc::IpcError;
     if let IpcError::Io(io_err) = e {
-        io_err.kind() == io::ErrorKind::WouldBlock
-            || io_err.kind() == io::ErrorKind::TimedOut
+        io_err.kind() == io::ErrorKind::WouldBlock || io_err.kind() == io::ErrorKind::TimedOut
     } else {
         false
     }
@@ -843,11 +859,7 @@ fn is_timeout_err(e: &wayclick_core::ipc::IpcError) -> bool {
 /// Event-driven continuous waybar mode.
 /// Subscribes to IPC events, updates cached state on each event, emits JSON lines on stdout.
 /// Reconnects automatically with exponential backoff on socket disconnect.
-fn run_waybar_event_driven(
-    socket_path: &std::path::Path,
-    format: &WaybarFormat,
-    flash_ms: u64,
-) {
+fn run_waybar_event_driven(socket_path: &std::path::Path, format: &WaybarFormat, flash_ms: u64) {
     let flash_duration = Duration::from_millis(flash_ms.max(50));
     let mut backoff = Duration::from_millis(500);
 
@@ -883,10 +895,14 @@ fn waybar_streaming_session(
     state.layer = "base".to_string();
 
     // Subscribe to all events and fetch initial full state in a single burst.
-    let id_sub = next_id; next_id += 1;
-    let id_status = next_id; next_id += 1;
-    let id_triggers = next_id; next_id += 1;
-    let id_layers = next_id; next_id += 1;
+    let id_sub = next_id;
+    next_id += 1;
+    let id_status = next_id;
+    next_id += 1;
+    let id_triggers = next_id;
+    next_id += 1;
+    let id_layers = next_id;
+    next_id += 1;
 
     for (id, method) in [
         (id_sub, "subscribe"),
@@ -912,11 +928,17 @@ fn waybar_streaming_session(
         let fid = frame.get("id").and_then(|v| v.as_u64());
         if let Some(id) = fid {
             if id == id_status {
-                if let Some(r) = frame.get("result") { apply_status(&mut state, r); }
+                if let Some(r) = frame.get("result") {
+                    apply_status(&mut state, r);
+                }
             } else if id == id_triggers {
-                if let Some(r) = frame.get("result") { apply_triggers(&mut state, r); }
+                if let Some(r) = frame.get("result") {
+                    apply_triggers(&mut state, r);
+                }
             } else if id == id_layers {
-                if let Some(r) = frame.get("result") { apply_layers(&mut state, r); }
+                if let Some(r) = frame.get("result") {
+                    apply_layers(&mut state, r);
+                }
             }
             pending -= 1;
         }
@@ -956,7 +978,7 @@ fn waybar_streaming_session(
 
         match decode_frame(&mut stream) {
             Ok(frame) => {
-                let is_event = frame.get("id").map_or(false, |v| v.is_null())
+                let is_event = frame.get("id").is_some_and(|v| v.is_null())
                     && frame.get("method").and_then(|v| v.as_str()) == Some("event");
 
                 if !is_event {
@@ -985,7 +1007,7 @@ fn waybar_streaming_session(
                                 t.active = false;
                             }
                         }
-                        if state.flash.as_ref().map_or(false, |(id, _)| id == tid) {
+                        if state.flash.as_ref().is_some_and(|(id, _)| id == tid) {
                             state.flash = None;
                         }
                     }
@@ -999,9 +1021,12 @@ fn waybar_streaming_session(
                     }
                     "config_reloaded" => {
                         // Re-fetch triggers and layers on the same connection.
-                        let id_st2 = next_id; next_id += 1;
-                        let id_tr2 = next_id; next_id += 1;
-                        let id_la2 = next_id; next_id += 1;
+                        let id_st2 = next_id;
+                        next_id += 1;
+                        let id_tr2 = next_id;
+                        next_id += 1;
+                        let id_la2 = next_id;
+                        next_id += 1;
                         for (id, method) in [
                             (id_st2, "status"),
                             (id_tr2, "list_triggers"),
@@ -1025,11 +1050,17 @@ fn waybar_streaming_session(
                                 Ok(f) => {
                                     if let Some(id) = f.get("id").and_then(|v| v.as_u64()) {
                                         if id == id_st2 {
-                                            if let Some(r) = f.get("result") { apply_status(&mut state, r); }
+                                            if let Some(r) = f.get("result") {
+                                                apply_status(&mut state, r);
+                                            }
                                         } else if id == id_tr2 {
-                                            if let Some(r) = f.get("result") { apply_triggers(&mut state, r); }
+                                            if let Some(r) = f.get("result") {
+                                                apply_triggers(&mut state, r);
+                                            }
                                         } else if id == id_la2 {
-                                            if let Some(r) = f.get("result") { apply_layers(&mut state, r); }
+                                            if let Some(r) = f.get("result") {
+                                                apply_layers(&mut state, r);
+                                            }
                                         }
                                         pending -= 1;
                                     }
@@ -1039,7 +1070,9 @@ fn waybar_streaming_session(
                             }
                         }
                     }
-                    _ => { emit = false; }
+                    _ => {
+                        emit = false;
+                    }
                 }
 
                 if emit {
@@ -1079,7 +1112,6 @@ impl WaybarState {
     fn flash_active(&self) -> bool {
         self.flash
             .as_ref()
-            .map_or(false, |(_, until)| Instant::now() < *until)
+            .is_some_and(|(_, until)| Instant::now() < *until)
     }
 }
-

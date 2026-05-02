@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! E2E tests for the event subscription system.
 //! Tests cover: event types, filtering, multiplexed commands+events, and multiple subscribers.
 
@@ -6,9 +7,7 @@ mod tests {
     use std::time::Duration;
 
     use serde_json::json;
-    use wayclick_core::config::{
-        ActionConfig, Config, TriggerBinding, TriggerMode,
-    };
+    use wayclick_core::config::{ActionConfig, Config, TriggerBinding, TriggerMode};
     use wayclick_core::engine::with_engine_events;
     use wayclick_core::ipc::decode_frame;
 
@@ -115,7 +114,8 @@ mod tests {
         daemon.ipc("enable", None);
 
         // Short wait: no enabled_changed event should arrive on our filtered socket
-        sock.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+        sock.set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
         let spurious = decode_frame(&mut sock);
         assert!(
             spurious.is_err(),
@@ -158,7 +158,8 @@ mod tests {
             let remaining = deadline
                 .checked_duration_since(std::time::Instant::now())
                 .unwrap_or(Duration::from_millis(1));
-            sock.set_read_timeout(Some(remaining.max(Duration::from_millis(1)))).unwrap();
+            sock.set_read_timeout(Some(remaining.max(Duration::from_millis(1))))
+                .unwrap();
 
             match decode_frame(&mut sock) {
                 Ok(msg) => {
@@ -175,8 +176,14 @@ mod tests {
             }
         }
 
-        assert!(got_response, "Should receive enable command response on subscribed socket");
-        assert!(got_event, "Should receive enabled_changed event on same socket");
+        assert!(
+            got_response,
+            "Should receive enable command response on subscribed socket"
+        );
+        assert!(
+            got_event,
+            "Should receive enabled_changed event on same socket"
+        );
 
         daemon.teardown();
     }
@@ -223,7 +230,8 @@ mod tests {
 
         // enabled_changed should NOT arrive now (it was in the previous all-events filter)
         daemon.ipc("enable", None);
-        sock.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+        sock.set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
         let spurious = decode_frame(&mut sock);
         assert!(
             spurious.is_err(),
@@ -235,7 +243,10 @@ mod tests {
         sock.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
         daemon.ipc("set_layer", Some(json!({"layer": "town"})));
         let event = wait_for_event(&mut sock, "layer_changed", Duration::from_secs(3));
-        assert!(event.is_some(), "layer_changed must arrive after resubscribe");
+        assert!(
+            event.is_some(),
+            "layer_changed must arrive after resubscribe"
+        );
 
         daemon.teardown();
     }

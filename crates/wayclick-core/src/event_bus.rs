@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::focus_tracker::WindowInfo;
 use crate::MutexExt;
 use serde::Serialize;
@@ -255,8 +256,12 @@ mod tests {
         let bus = EventBus::new();
         let rx = bus.subscribe(None);
         bus.publish(&Event::trigger_activated("t1".into()));
-        let event = rx.recv_timeout(std::time::Duration::from_millis(100)).unwrap();
-        assert!(matches!(event, Event::TriggerActivated { ref trigger_id, .. } if trigger_id == "t1"));
+        let event = rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
+        assert!(
+            matches!(event, Event::TriggerActivated { ref trigger_id, .. } if trigger_id == "t1")
+        );
     }
 
     #[test]
@@ -266,7 +271,9 @@ mod tests {
         bus.publish(&Event::trigger_activated("t1".into()));
         bus.publish(&Event::layer_changed("base".into(), "combat".into()));
         // First event was filtered; only layer_changed arrives
-        let event = rx.recv_timeout(std::time::Duration::from_millis(100)).unwrap();
+        let event = rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
         assert!(matches!(event, Event::LayerChanged { .. }));
         assert!(rx.try_recv().is_err(), "no more events expected");
     }
@@ -277,8 +284,12 @@ mod tests {
         let rx1 = bus.subscribe(None);
         let rx2 = bus.subscribe(None);
         bus.publish(&Event::enabled_changed(false));
-        assert!(rx1.recv_timeout(std::time::Duration::from_millis(100)).is_ok());
-        assert!(rx2.recv_timeout(std::time::Duration::from_millis(100)).is_ok());
+        assert!(rx1
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_ok());
+        assert!(rx2
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_ok());
     }
 
     #[test]
@@ -286,7 +297,7 @@ mod tests {
         let bus = EventBus::new();
         let rx = bus.subscribe(None);
         drop(rx); // simulate connection close
-        // Should not panic; dead subscriber pruned on next publish
+                  // Should not panic; dead subscriber pruned on next publish
         bus.publish(&Event::config_reloaded());
         assert_eq!(bus.subscribers.lock_or_recover().len(), 0);
     }
@@ -295,7 +306,7 @@ mod tests {
     fn test_slow_subscriber_pruned_when_full() {
         let bus = EventBus::new();
         let _rx = bus.subscribe(None); // never drained
-        // Fill the channel beyond capacity
+                                       // Fill the channel beyond capacity
         for i in 0..=SUBSCRIBER_CHANNEL_CAPACITY {
             bus.publish(&Event::trigger_activated(format!("t{}", i)));
         }
@@ -305,9 +316,18 @@ mod tests {
 
     #[test]
     fn test_event_type_from_str() {
-        assert_eq!(EventType::from_str("trigger_activated"), Some(EventType::TriggerActivated));
-        assert_eq!(EventType::from_str("config_reloaded"), Some(EventType::ConfigReloaded));
-        assert_eq!(EventType::from_str("scroll_received"), Some(EventType::ScrollReceived));
+        assert_eq!(
+            EventType::from_str("trigger_activated"),
+            Some(EventType::TriggerActivated)
+        );
+        assert_eq!(
+            EventType::from_str("config_reloaded"),
+            Some(EventType::ConfigReloaded)
+        );
+        assert_eq!(
+            EventType::from_str("scroll_received"),
+            Some(EventType::ScrollReceived)
+        );
         assert_eq!(EventType::from_str("unknown"), None);
     }
 
@@ -326,9 +346,16 @@ mod tests {
         let bus = EventBus::new();
         let rx = bus.subscribe(Some(vec![EventType::ScrollReceived]));
         bus.publish(&Event::scroll_received(0, 1, "mouse".to_string()));
-        let event = rx.recv_timeout(std::time::Duration::from_millis(100)).unwrap();
-        assert!(
-            matches!(event, Event::ScrollReceived { delta_x: 0, delta_y: 1, .. })
-        );
+        let event = rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .unwrap();
+        assert!(matches!(
+            event,
+            Event::ScrollReceived {
+                delta_x: 0,
+                delta_y: 1,
+                ..
+            }
+        ));
     }
 }

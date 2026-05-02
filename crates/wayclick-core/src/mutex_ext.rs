@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use std::sync::{Mutex, MutexGuard};
 
 /// Extension trait for [`Mutex`] that recovers from poison instead of panicking.

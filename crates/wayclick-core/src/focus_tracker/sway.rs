@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Sway/i3-compatible compositor focus backend.
 //!
 //! Uses the i3 binary IPC protocol over `$SWAYSOCK`:
@@ -96,7 +97,10 @@ fn read_message(stream: &mut UnixStream) -> io::Result<(u32, Vec<u8>)> {
     stream.read_exact(&mut header)?;
 
     if &header[0..6] != MAGIC {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "bad i3-ipc magic"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "bad i3-ipc magic",
+        ));
     }
 
     let length = u32::from_le_bytes(header[6..10].try_into().unwrap()) as usize;
@@ -129,10 +133,7 @@ fn window_info_from_container(node: &serde_json::Value) -> WindowInfo {
         .unwrap_or("")
         .to_string();
 
-    let pid: Option<u32> = node
-        .get("pid")
-        .and_then(|p| p.as_u64())
-        .map(|p| p as u32);
+    let pid: Option<u32> = node.get("pid").and_then(|p| p.as_u64()).map(|p| p as u32);
 
     let process_name = pid.and_then(process_name_for_pid);
 
@@ -162,14 +163,17 @@ fn window_info_from_container(node: &serde_json::Value) -> WindowInfo {
 
 /// Recursively finds the focused leaf node in a Sway tree.
 fn find_focused_node(node: &serde_json::Value) -> Option<&serde_json::Value> {
-    if node.get("focused").and_then(|f| f.as_bool()).unwrap_or(false) {
+    if node
+        .get("focused")
+        .and_then(|f| f.as_bool())
+        .unwrap_or(false)
+    {
         // Only return leaf nodes (actual windows, not containers)
         let node_type = node.get("type").and_then(|t| t.as_str()).unwrap_or("");
-        if matches!(node_type, "con" | "floating_con" | "xwayland_view") {
-            if node.get("app_id").is_some() || node.get("window_properties").is_some() {
+        if matches!(node_type, "con" | "floating_con" | "xwayland_view")
+            && (node.get("app_id").is_some() || node.get("window_properties").is_some()) {
                 return Some(node);
             }
-        }
     }
 
     for child_key in &["nodes", "floating_nodes"] {
@@ -220,8 +224,7 @@ fn subscribe_window_events(
         let (msg_type, payload) = match read_message(&mut stream) {
             Ok(m) => m,
             Err(e)
-                if e.kind() == io::ErrorKind::WouldBlock
-                    || e.kind() == io::ErrorKind::TimedOut =>
+                if e.kind() == io::ErrorKind::WouldBlock || e.kind() == io::ErrorKind::TimedOut =>
             {
                 continue;
             }

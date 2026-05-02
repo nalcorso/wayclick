@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // ConfigWatcher — watches Lua config files for changes and triggers reload.
 
 use crate::logger::Logger;

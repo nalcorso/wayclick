@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! No-op fallback focus backend.
 
 use crate::event_bus::EventBus;

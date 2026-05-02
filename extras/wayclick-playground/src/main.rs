@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use macroquad::prelude::*;
 
 mod app_state;

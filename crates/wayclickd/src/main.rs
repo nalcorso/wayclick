@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use clap::Parser;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -7,8 +8,8 @@ use std::time::Duration;
 use wayclick_core::config::{effective_socket_path, Config};
 use wayclick_core::config_watcher::ConfigWatcher;
 use wayclick_core::engine::{with_engine_events, Engine};
-use wayclick_core::event_bus::EventBus;
 use wayclick_core::evdev_monitor::EvdevMonitor;
+use wayclick_core::event_bus::EventBus;
 use wayclick_core::focus_tracker::FocusTracker;
 use wayclick_core::input_backend::{InputBackend, LoggingBackend};
 use wayclick_core::ipc::IpcServer;

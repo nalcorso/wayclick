@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 // UinputBackend — emits real input events via /dev/uinput
 //
 // This module is gated behind the `integration` feature for tests since it

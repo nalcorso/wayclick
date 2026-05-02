@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 //! Benchmarks for the engine action execution hot path.
 //!
 //! These benchmarks measure pure engine overhead using NullBackend (zero I/O cost).

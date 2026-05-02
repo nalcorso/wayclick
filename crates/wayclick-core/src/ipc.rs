@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::config::{TriggerBinding, TriggerMode};
 use crate::engine::{with_engine_events, Engine};
 use crate::event_bus::{EventBus, EventType};
@@ -369,9 +370,7 @@ impl IpcServer {
                     let logger = self.logger.clone();
                     let event_bus = self.event_bus.clone();
                     let focus_tracker = self.focus_tracker.clone();
-                    let conn_id = self
-                        .connection_id_counter
-                        .fetch_add(1, Ordering::Relaxed);
+                    let conn_id = self.connection_id_counter.fetch_add(1, Ordering::Relaxed);
                     let guard = ConnectionGuard {
                         counter: self.connection_count.clone(),
                     };
@@ -420,7 +419,10 @@ fn handle_client(
     let stream_write = match stream_read.try_clone() {
         Ok(s) => s,
         Err(e) => {
-            logger.warn(format!("IPC stream clone failed, closing connection: {}", e));
+            logger.warn(format!(
+                "IPC stream clone failed, closing connection: {}",
+                e
+            ));
             return;
         }
     };
@@ -548,7 +550,10 @@ fn handle_request_with_conn(
                                 "method": "event",
                                 "params": serde_json::to_value(&event).unwrap_or(json!(null)),
                             });
-                            if writer_tx_clone.send(WriterMsg::Frame(notification)).is_err() {
+                            if writer_tx_clone
+                                .send(WriterMsg::Frame(notification))
+                                .is_err()
+                            {
                                 break;
                             }
                         }
@@ -561,10 +566,16 @@ fn handle_request_with_conn(
             let subscribed_types = match &filter {
                 None => json!("all"),
                 Some(types) => {
-                    json!(types.iter().map(|t| serde_json::to_value(t).unwrap_or(json!(null))).collect::<Vec<_>>())
+                    json!(types
+                        .iter()
+                        .map(|t| serde_json::to_value(t).unwrap_or(json!(null)))
+                        .collect::<Vec<_>>())
                 }
             };
-            make_response(id, json!({ "subscribed": true, "events": subscribed_types }))
+            make_response(
+                id,
+                json!({ "subscribed": true, "events": subscribed_types }),
+            )
         }
 
         "unsubscribe" => {
@@ -663,7 +674,11 @@ fn parse_event_filter(params: Option<&Value>) -> Option<Vec<EventType>> {
         .filter_map(|v| v.as_str())
         .filter_map(EventType::from_str)
         .collect();
-    if types.is_empty() { None } else { Some(types) }
+    if types.is_empty() {
+        None
+    } else {
+        Some(types)
+    }
 }
 
 /// Client-side helper: connect to daemon socket with read/write timeouts set.
@@ -899,7 +914,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let socket_path = dir.path().join("test.sock");
 
-        let server = IpcServer::new(socket_path.clone(), engine, logger, Arc::new(EventBus::new()), None).unwrap();
+        let server = IpcServer::new(
+            socket_path.clone(),
+            engine,
+            logger,
+            Arc::new(EventBus::new()),
+            None,
+        )
+        .unwrap();
         let shutdown = server.shutdown_flag();
 
         let server_handle = thread::spawn(move || {

@@ -1,15 +1,16 @@
+// SPDX-License-Identifier: MIT
 // Integration tests for wayclick
 
 #[cfg(test)]
-pub mod helpers;
-#[cfg(test)]
 mod e2e_actions;
+#[cfg(test)]
+mod e2e_dynamic;
 #[cfg(test)]
 mod e2e_events;
 #[cfg(test)]
 mod e2e_ipc;
 #[cfg(test)]
-mod e2e_dynamic;
+pub mod helpers;
 
 #[cfg(test)]
 mod integration {
@@ -17,12 +18,12 @@ mod integration {
     use std::thread;
     use std::time::Duration;
 
+    use serde_json::json;
     use wayclick_core::config::Config;
     use wayclick_core::engine::with_engine_events;
     use wayclick_core::ipc::decode_frame;
     use wayclick_core::logger::{LogLevel, Logger};
     use wayclick_core::lua_api::load_config;
-    use serde_json::json;
 
     use crate::helpers::{ipc_call_raw, poll_until, TestDaemon};
 
@@ -260,7 +261,12 @@ mod integration {
             }),
         );
 
-        let resp = ipc_call_raw(&mut sock, 2, "unregister_trigger", json!({"id": "to_remove"}));
+        let resp = ipc_call_raw(
+            &mut sock,
+            2,
+            "unregister_trigger",
+            json!({"id": "to_remove"}),
+        );
         assert_eq!(resp["result"]["unregistered"], "to_remove");
 
         let resp = ipc_call_raw(&mut sock, 3, "list_dynamic_triggers", json!({}));
@@ -313,7 +319,10 @@ mod integration {
                 "action": {"type": "auto_click", "button": "left", "interval_ms": 0}
             }),
         );
-        assert!(resp.get("error").is_some(), "Zero interval should be rejected");
+        assert!(
+            resp.get("error").is_some(),
+            "Zero interval should be rejected"
+        );
 
         daemon.teardown();
     }
@@ -330,8 +339,12 @@ mod integration {
 
         daemon.ipc("enable", None);
 
-        let event = crate::helpers::wait_for_event(&mut sock, "enabled_changed", Duration::from_secs(3));
-        assert!(event.is_some(), "Should have received enabled_changed event");
+        let event =
+            crate::helpers::wait_for_event(&mut sock, "enabled_changed", Duration::from_secs(3));
+        assert!(
+            event.is_some(),
+            "Should have received enabled_changed event"
+        );
         assert_eq!(event.unwrap()["enabled"], true);
 
         daemon.teardown();
@@ -348,9 +361,13 @@ mod integration {
 
         daemon.ipc("enable", None);
 
-        sock.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+        sock.set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
         let received = decode_frame(&mut sock);
-        assert!(received.is_err(), "Should not receive events after unsubscribe");
+        assert!(
+            received.is_err(),
+            "Should not receive events after unsubscribe"
+        );
 
         daemon.teardown();
     }

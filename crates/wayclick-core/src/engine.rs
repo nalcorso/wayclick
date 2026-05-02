@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 use crate::config::*;
 use crate::event_bus::{Event, EventBus};
 use crate::input_backend::{BackendError, InputBackend};
@@ -137,12 +138,7 @@ impl Engine {
 
     pub fn apply_config(&mut self, config: Config) {
         // Only stop static trigger workers; dynamic triggers are preserved.
-        let static_ids: Vec<String> = self
-            .config
-            .triggers
-            .iter()
-            .map(|t| t.id.clone())
-            .collect();
+        let static_ids: Vec<String> = self.config.triggers.iter().map(|t| t.id.clone()).collect();
         for id in &static_ids {
             self.stop_worker(id);
         }
@@ -150,7 +146,9 @@ impl Engine {
         let dynamic_ids: Vec<String> = self.dynamic_triggers.keys().cloned().collect();
         self.state.retain(|id, _| dynamic_ids.contains(id));
         for trigger in &config.triggers {
-            self.state.entry(trigger.id.clone()).or_insert(TriggerState::Idle);
+            self.state
+                .entry(trigger.id.clone())
+                .or_insert(TriggerState::Idle);
         }
         self.config = config;
         self.pending_events.push(Event::config_reloaded());
@@ -211,11 +209,7 @@ impl Engine {
             .iter()
             .find(|t| t.id == id)
             .cloned()
-            .or_else(|| {
-                self.dynamic_triggers
-                    .get(id)
-                    .map(|e| e.trigger.clone())
-            })
+            .or_else(|| self.dynamic_triggers.get(id).map(|e| e.trigger.clone()))
             .ok_or_else(|| EngineError::UnknownTrigger(id.to_string()))?;
 
         match trigger.mode {
@@ -525,8 +519,7 @@ impl Engine {
             .iter()
             .filter(|(_, e)| e.owner_connection_id == owner_connection_id)
             .map(|(id, entry)| {
-                let active =
-                    matches!(self.state.get(id), Some(TriggerState::Active { .. }));
+                let active = matches!(self.state.get(id), Some(TriggerState::Active { .. }));
                 let stats = self.trigger_stats.get(id).cloned().unwrap_or_default();
                 let user_enabled = self.trigger_enabled.get(id).copied().unwrap_or(true);
                 TriggerSnapshot {
@@ -1137,7 +1130,13 @@ mod tests {
             device_bindings: vec![],
             profile_rules: vec![],
         };
-        let engine = Engine::new(config, Arc::new(backend), logger, Arc::new(EventBus::new()), "test".into());
+        let engine = Engine::new(
+            config,
+            Arc::new(backend),
+            logger,
+            Arc::new(EventBus::new()),
+            "test".into(),
+        );
         (engine, calls)
     }
 
@@ -1579,7 +1578,11 @@ mod tests {
 
     #[test]
     fn test_register_dynamic_trigger_rejects_duplicate_static_id() {
-        let (mut engine, _) = test_engine(vec![auto_click_trigger("existing", 50, TriggerMode::Toggle)]);
+        let (mut engine, _) = test_engine(vec![auto_click_trigger(
+            "existing",
+            50,
+            TriggerMode::Toggle,
+        )]);
         let dup = auto_click_trigger("existing", 50, TriggerMode::Toggle);
         let result = engine.register_dynamic_trigger(dup, 1);
         assert!(matches!(result, Err(EngineError::DuplicateTrigger(_))));
@@ -1612,6 +1615,9 @@ mod tests {
         let (mut engine, _) = test_engine(vec![]);
         let good = auto_click_trigger("valid_dyn", 50, TriggerMode::Toggle);
         assert!(engine.register_dynamic_trigger(good, 1).is_ok());
-        assert!(engine.triggers_snapshot().iter().any(|t| t.id == "valid_dyn" && t.dynamic));
+        assert!(engine
+            .triggers_snapshot()
+            .iter()
+            .any(|t| t.id == "valid_dyn" && t.dynamic));
     }
 }
