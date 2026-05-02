@@ -92,9 +92,10 @@ wayclick.bind_device({
 })
 ```
 
-> **Why `exclusive = true`?** Without it, the scroll event reaches the game
-> *and* fires a click — you'd get double input. Exclusive mode suppresses the
-> raw event; wayclick's virtual device delivers only the click.
+> **Why `exclusive = true`?** Exclusive mode prevents the raw scroll event from reaching
+> the OS while wayclick's virtual device delivers only the click. This prevents double input.
+> For a detailed explanation of exclusive mode, device matching, and EVIOCGRAB, see
+> [DEVICE_MATCHING.md](DEVICE_MATCHING.md#exclusive-mode).
 
 **Test it:**
 

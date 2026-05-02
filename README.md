@@ -1,3 +1,11 @@
+```
+ __      __   ___   _  _  __  __  ___   __
+/ _\    /__\ / _ \ | \/ |/ / / / / __| / /
+\_/ |\/||_ _| (_) ||    </ / / /\__ \/ /__
+   |_/\_|| || ___/ |_/\_|\_|/_/ |___/\__/
+         |_|
+```
+
 # wayclick
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -55,25 +63,8 @@ all. Write your config in Lua. Run it as a systemd service. Automate everything.
 
 ## Quick start
 
-→ **New user?** See [docs/QUICKSTART.md](docs/QUICKSTART.md) for worked examples
-of the three most common setups.
-
-The short version:
-
-```sh
-# 1. Build
-cargo build --workspace --release
-
-# 2. Set up permissions (groups + udev rules — requires log out/in after)
-./scripts/install.sh
-
-# 3. Copy the example config
-mkdir -p ~/.config/wayclick
-cp config/init.lua ~/.config/wayclick/init.lua
-
-# 4. Start the daemon
-wayclickd --enable
-```
+→ **Getting started?** See [docs/QUICKSTART.md](docs/QUICKSTART.md) for a complete setup guide
+with worked examples of the three most common setups (scroll-to-click, auto-clicker, macros).
 
 ---
 
@@ -227,33 +218,13 @@ cargo install --path crates/wayclick-tui
 cargo install --path crates/wayclick-evdev-dump
 ```
 
-### Permissions
+### Permissions and Setup
 
-Wayclick needs read access to `/dev/input/event*` and write access to
-`/dev/uinput`. The install script handles this:
+Wayclick requires read access to `/dev/input/event*` and write access to `/dev/uinput`.
+See [PERMISSIONS.md](docs/PERMISSIONS.md) for the complete setup guide (groups, udev
+rules, and systemd service).
 
-```sh
-./scripts/install.sh
-# Then log out and back in
-```
-
-Or manually:
-
-```sh
-sudo groupadd -f wayclick
-sudo usermod -aG wayclick,input "$USER"
-sudo cp udev/99-wayclick.rules /etc/udev/rules.d/
-sudo udevadm control --reload && sudo udevadm trigger
-```
-
-See [docs/PERMISSIONS.md](docs/PERMISSIONS.md) for details.
-
-### systemd user service
-
-```sh
-cp systemd/wayclickd.service ~/.config/systemd/user/
-systemctl --user enable --now wayclickd
-```
+For development builds and cross-compilation, see [BUILDING.md](docs/BUILDING.md).
 
 ### Hyprland
 
@@ -263,8 +234,8 @@ bind = SUPER, F12, exec, wayclickctl reload
 exec-once = wayclickd --enable
 ```
 
-See [docs/HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) for more examples
-including submaps and per-trigger bindings.
+See [docs/DESKTOP_ENVIRONMENTS.md](docs/DESKTOP_ENVIRONMENTS.md) for setup guides
+and examples for all supported desktop environments.
 
 ---
 
@@ -330,6 +301,7 @@ See [docs/BUILDING.md](docs/BUILDING.md) for cross-compilation and fuzz testing.
 | Document | Description |
 |---|---|
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | Worked examples for the three most common setups |
+| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Common issues and solutions, debugging commands |
 | [docs/CONFIG_SCHEMA.md](docs/CONFIG_SCHEMA.md) | Complete Lua API reference |
 | [docs/IPC.md](docs/IPC.md) | IPC protocol reference with Python/bash examples |
 | [docs/DEVICE_MATCHING.md](docs/DEVICE_MATCHING.md) | How to identify and bind physical devices |
@@ -339,7 +311,7 @@ See [docs/BUILDING.md](docs/BUILDING.md) for cross-compilation and fuzz testing.
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, Lua sandbox, IPC security |
 | [docs/BUILDING.md](docs/BUILDING.md) | Build from source, testing, fuzz targets |
 | [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md) | Development workflow, adding action types |
-| [docs/HYPRLAND_BINDINGS.md](docs/HYPRLAND_BINDINGS.md) | Hyprland keybinding examples |
+| [docs/DESKTOP_ENVIRONMENTS.md](docs/DESKTOP_ENVIRONMENTS.md) | Integration guides for Hyprland, Sway, i3, KDE, GNOME |
 | [extras/waybar/](extras/waybar/) | Waybar status module with CSS themes |
 | [examples/](examples/) | Ready-to-use Lua config examples |
 

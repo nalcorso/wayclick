@@ -9,6 +9,40 @@ Lua runtime after config load.
 
 ---
 
+## Table of Contents
+
+- [Global Options](#global-options)
+- [Triggers](#triggers)
+  - [Trigger modes](#trigger-modes)
+  - [Action types](#action-types)
+    - [auto_click](#auto_click)
+    - [click](#click)
+    - [key_press](#key_press)
+    - [keystroke](#keystroke)
+    - [type_text](#type_text)
+    - [scroll](#scroll)
+    - [mouse_move](#mouse_move)
+    - [composite (parallel)](#composite-parallel)
+    - [composite (sequence)](#composite-sequence)
+    - [delay](#delay)
+    - [mouse_move_abs](#mouse_move_abs)
+    - [click_at](#click_at)
+    - [drag](#drag)
+    - [set_layer](#set_layer)
+    - [media_key](#media_key)
+- [Device Bindings](#device-bindings)
+  - [Binding Options](#binding-options)
+- [Layers](#layers)
+- [Per-App Profiles](#per-app-profiles)
+- [Lua Modules](#lua-modules)
+- [Key Names](#key-names)
+  - [Media Keys](#media-keys)
+- [CLI reference (wayclickctl)](#cli-reference-wayclickctl)
+- [Config hot-reload](#config-hot-reload)
+- [Complete Example Config](#complete-example-config)
+
+---
+
 ## Global Options
 
 ```lua
@@ -578,3 +612,186 @@ kill -HUP $(pidof wayclickd)        # direct signal
 
 Hot-reload restarts the evdev monitor with the new bindings. Running triggers
 are stopped before reload. The active layer is preserved.
+
+---
+
+## Complete Example Config
+
+Below is a real, working configuration that demonstrates multiple components
+working together: global options, multiple trigger types, device bindings with
+different binding types, layer management, and proper commenting for clarity.
+
+```lua
+-- ~/.config/wayclick/init.lua
+-- Complete example showcasing global options, triggers, devices, and layers
+
+-- ============================================================================
+-- GLOBAL CONFIGURATION
+-- ============================================================================
+wayclick.set_options({
+  dry_run        = false,          -- Set to true for testing without emitting real events
+  socket_path    = nil,            -- Use default socket at $XDG_RUNTIME_DIR/wayclick.sock
+  log_capacity   = 512,            -- Ring buffer size for log entries
+  min_interval_ms = 1,             -- Minimum interval between events (ms)
+})
+
+-- ============================================================================
+-- LAYER DEFINITIONS
+-- ============================================================================
+-- Define two layers: "gaming" (with auto-clicker) and "normal" (disabled)
+-- Start in the "normal" layer by default.
+
+wayclick.set_profile({
+  layers = {
+    normal  = { name = "Normal",  is_default = true  },
+    gaming  = { name = "Gaming",  is_default = false },
+  },
+})
+
+-- ============================================================================
+-- TRIGGER: Auto-click toggle (gaming layer)
+-- ============================================================================
+-- Toggle rapid left-clicking on/off. Only enabled in gaming layer.
+-- - First press starts the loop
+-- - Second press stops it
+-- - Fires every 10ms with ±5ms jitter for anti-detection
+
+wayclick.register_trigger({
+  id          = "auto_clicker",
+  name        = "Auto Clicker",
+  description = "Rapid left-click toggle for gaming",
+  mode        = "toggle",
+  cooldown_ms = 300,              -- Minimum 300ms before retrigger
+  duration_ms = nil,              -- Run forever (until manually stopped)
+  action      = wayclick.auto_click({
+    button      = "left",
+    interval_ms = 10,
+    jitter_ms   = 5,
+    hold_ms     = 2,              -- Hold button for 2ms per click
+  }),
+})
+
+-- ============================================================================
+-- TRIGGER: Scroll-to-click remap
+-- ============================================================================
+-- Single click per scroll notch. Fast scrolling fires multiple times.
+-- Useful for ARPGs and click-intensive games.
+
+wayclick.register_trigger({
+  id          = "scroll_click",
+  name        = "Scroll Click",
+  description = "Remap scroll wheel to left-click",
+  mode        = "oneshot",
+  action      = wayclick.click({ button = "left" }),
+})
+
+-- ============================================================================
+-- TRIGGER: Right-click
+-- ============================================================================
+
+wayclick.register_trigger({
+  id     = "right_click",
+  name   = "Right Click",
+  mode   = "oneshot",
+  action = wayclick.click({ button = "right" }),
+})
+
+-- ============================================================================
+-- TRIGGER: Layer switch helper (oneshot)
+-- ============================================================================
+-- Jump to the "gaming" layer with a keybind
+
+wayclick.register_trigger({
+  id     = "switch_to_gaming",
+  name   = "Switch to Gaming",
+  mode   = "oneshot",
+  action = wayclick.set_layer("gaming"),
+})
+
+-- ============================================================================
+-- TRIGGER: Layer switch helper (oneshot)
+-- ============================================================================
+-- Jump back to "normal" layer
+
+wayclick.register_trigger({
+  id     = "switch_to_normal",
+  name   = "Switch to Normal",
+  mode   = "oneshot",
+  action = wayclick.set_layer("normal"),
+})
+
+-- ============================================================================
+-- DEVICE BINDINGS: Gaming Mouse
+-- ============================================================================
+-- Bind to a Logitech G Pro mouse (or by VID:PID for portability).
+-- In gaming layer: MB5 (forward) toggles auto-click, scroll fires left-click
+-- exclusive=true prevents the OS from seeing these events.
+
+wayclick.bind_device({
+  -- Match by device name
+  name = "Logitech USB Receiver Mouse",
+  
+  -- Optionally match by vendor:product ID instead:
+  -- vid = 0x046d, pid = 0xc08b,
+  
+  exclusive = true,               -- Grab the device exclusively
+  
+  bindings = {
+    -- Button bindings
+    { code = "BTN_EXTRA",  trigger = "auto_clicker" },  -- MB5 (forward)
+    { code = "BTN_SIDE",   trigger = "right_click"  },  -- MB4 (back)
+    
+    -- Scroll bindings
+    { scroll = "up",   trigger = "scroll_click" },
+    { scroll = "down", trigger = "scroll_click" },
+  },
+})
+
+-- ============================================================================
+-- DEVICE BINDINGS: Keyboard
+-- ============================================================================
+-- Layer switching via keyboard shortcuts (non-exclusive).
+-- These don't prevent the OS from seeing the key events.
+
+wayclick.bind_device({
+  name = "AT Translated Set 2 keyboard",  -- Most Linux systems
+  exclusive = false,
+  bindings = {
+    -- F1 = switch to normal layer
+    { code = "KEY_F1", trigger = "switch_to_normal" },
+    -- F2 = switch to gaming layer
+    { code = "KEY_F2", trigger = "switch_to_gaming" },
+  },
+})
+
+-- ============================================================================
+-- NOTES FOR CUSTOMIZATION
+-- ============================================================================
+--
+-- 1. Find your device name with: wayclickctl devices
+--
+-- 2. Find button/key codes with: wayclick-evdev-dump monitor
+--    Then click/press the button you want to bind.
+--
+-- 3. Common button codes:
+--    - BTN_LEFT, BTN_RIGHT, BTN_MIDDLE (main buttons)
+--    - BTN_SIDE, BTN_EXTRA (back/forward)
+--    - BTN_FORWARD, BTN_BACK (alternate names)
+--
+-- 4. Common key codes:
+--    - KEY_F1 through KEY_F12 (function keys)
+--    - KEY_A through KEY_Z (letters)
+--    - KEY_SPACE, KEY_ENTER, KEY_ESC, etc.
+--
+-- 5. Hot-reload your config:
+--    wayclickctl reload
+--    Or send SIGHUP to the daemon:
+--    kill -HUP $(pidof wayclickd)
+```
+
+This example demonstrates:
+- **Global options:** DRY_RUN disabled, default socket path, standard log capacity
+- **Layers:** Two named layers (gaming/normal) for context-aware configs
+- **Multiple trigger types:** Toggle (auto-click), oneshot (click, layer switch)
+- **Device bindings:** Exclusive gaming mouse + non-exclusive keyboard layer switching
+- **Documentation:** Inline comments explain each section and how to customize
