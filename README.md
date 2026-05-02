@@ -15,6 +15,13 @@ all. Write your config in Lua. Run it as a systemd service. Automate everything.
 > Architecture, design decisions, and final implementation remain the
 > responsibility of the human author.
 
+> **Rust Disclosure** — Wayclick is written in Rust because someone had to pick
+> a language and a coin landed heads. Rest assured, the author is not a
+> Rust evangelist in a desert island with nothing but fervent conviction and a
+> laptop. The choice was practical (performance, safety, existing ecosystem) but
+> wholly unmotivated by ideology. If you have strong opinions about whether this
+> should be Go, C, or Zig, please enjoy your conviction privately.
+
 ---
 
 ## What wayclick does

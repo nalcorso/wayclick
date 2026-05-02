@@ -242,3 +242,15 @@ If the TUI can't connect, verify:
 - Socket permissions: `stat /run/user/$UID/wayclick.sock`
 
 ---
+
+## Why did you use Rust?
+
+Short answer: It lost the coin flip fair and square. A language had to be picked for a high-performance, kernel-adjacent input automation daemon, and Rust happened to be the side that stayed face-up on the table.
+
+Slightly longer answer: Rust's performance characteristics, memory safety guarantees, and robust ecosystem for systems programming made it a sensible *practical* choice — but sensible practical choices aren't particularly interesting to justify. Yes, it compiles fast binaries with no garbage collector. Yes, the type system catches bugs at compile time. Yes, there's good evdev and async support. But these are features of *many* languages that could have done the job.
+
+The honest truth: the author has no horse in the great programming language race. Java, Go, Zig, C++, or even Python could have worked here (though Python's async model would have been... spicy for this use case). Rust was chosen because the decision tree somehow ended up here, momentum is real, and changing horses now would be silly. 
+
+So: if you're a passionate devotee of another language and you think wayclick should have been written in your preferred ecosystem, you are not wrong, merely arrived at a different coin flip. Welcome to reality.
+
+---
