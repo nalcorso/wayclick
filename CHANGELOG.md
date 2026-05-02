@@ -2,7 +2,15 @@
 
 All notable changes to wayclick are documented in this file.
 
-## [0.1.0] - 2024-01-15
+## Repository History
+
+The git history for this repository was collapsed before the initial public release to preserve privacy during early development. The v0.1.0 tag represents the first public version.
+
+For development history, see the git log from v0.1.0 onwards.
+
+---
+
+## [0.1.0] - 2026-05-02
 
 ### Added
 

@@ -10,10 +10,9 @@ Wayclick reads physical button presses directly from the kernel's input layer
 doesn't care which display server you're running — Wayland, X11, or none at
 all. Write your config in Lua. Run it as a systemd service. Automate everything.
 
-> **AI Disclosure** — Developed with AI coding agents (Claude via GitHub
-> Copilot). All code was reviewed, tested, and approved by the maintainer.
-> Architecture, design decisions, and final implementation remain the
-> responsibility of the human author.
+> **AI Disclosure** — This project was developed with AI assistance (Claude via GitHub Copilot) under human direction. Architecture decisions, security model, and feature design were human-directed; code generation and documentation were AI-assisted. Git history was collapsed before this initial public release to preserve privacy. All tests pass, code builds successfully, and security review is clean.
+> 
+> See [SECURITY.md](docs/SECURITY.md) and [CHANGELOG.md](CHANGELOG.md) for details.
 
 > **Rust Disclosure** — Wayclick is written in Rust because someone had to pick
 > a language and a coin landed heads. Rest assured, the author is not a
