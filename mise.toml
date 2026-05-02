@@ -10,10 +10,6 @@ run = "cargo build --workspace"
 description = "Build release binaries"
 run = "cargo build --workspace --release"
 
-[tasks.test]
-description = "Run all tests"
-run = "cargo test --workspace"
-
 [tasks.check]
 description = "Run all CI checks (fmt, clippy, test, deny)"
 run = """
@@ -23,10 +19,6 @@ echo "=== clippy ===" && cargo clippy --workspace -- -D warnings
 echo "=== test ===" && cargo test --workspace
 echo "=== deny ===" && cargo deny check
 """
-
-[tasks.fmt]
-description = "Format all code"
-run = "cargo fmt --all"
 
 [tasks.fuzz]
 description = "Run fuzz tests (requires nightly)"
@@ -53,6 +45,3 @@ run = "./scripts/dev.sh"
 description = "Run the wayclick-playground input visualiser"
 run = "cargo run -p wayclick-playground --release"
 
-[tasks.playground-dev]
-description = "Run the wayclick-playground (debug build, faster compile)"
-run = "cargo run -p wayclick-playground"
