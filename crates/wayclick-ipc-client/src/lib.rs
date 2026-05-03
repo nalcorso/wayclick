@@ -11,3 +11,5 @@
 pub mod frame;
 
 pub use frame::{IpcError, MAX_FRAME_SIZE};
+
+pub mod socket;
