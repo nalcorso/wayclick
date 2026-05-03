@@ -10,6 +10,24 @@ External programs (game plugins, scripts, GUI frontends, etc.) can use it to:
 
 ---
 
+## Reusable client library
+
+Programs that want to consume this protocol from Rust can depend on
+`wayclick-ipc-client` (in `crates/wayclick-ipc-client`) instead of
+re-implementing the framing and handshake. It provides:
+
+- `frame::{encode_frame, decode_frame, write_frame, read_frame, MAX_FRAME_SIZE}` — the framing primitives.
+- `socket::default_socket_path()` — XDG/UID-based path resolution that matches what the daemon writes.
+- `SyncClient::request(path, method, params)` — blocking request/response, used by `wayclick-tui` and `wayclickctl`.
+- `connect_with_timeout(path, timeout_ms)` — for hand-rolled streaming subscribe loops with custom ID tracking.
+- `AsyncClient::connect(path)` — background-thread streaming with typed `IpcMessage` events; used by `wayclick-playground`.
+
+The crate has no dependency on `wayclick-core` and pulls only `serde`,
+`serde_json`, and `thiserror` — small enough to embed in third-party
+monitoring tools, game integrations, or input visualizers.
+
+---
+
 ## Connection
 
 The socket path is configured in `wayclickd` (default `${XDG_RUNTIME_DIR}/wayclick.sock` or `/run/wayclick.sock`).

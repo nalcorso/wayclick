@@ -63,8 +63,9 @@ impl SyncClient {
 /// handshake. Most callers want [`SyncClient::request`] or [`AsyncClient`] instead.
 ///
 /// `timeout_ms` is applied to both reads and writes. A value of `0` sets
-/// `Duration::from_millis(0)` on the stream, matching the legacy
-/// `wayclick_core::ipc::ipc_connect` behavior.
+/// `Duration::from_millis(0)` on the stream, which the kernel treats as
+/// "no timeout" — useful for streaming connections that will manage their
+/// own timeouts (e.g. by switching the stream to non-blocking mode).
 pub fn connect_with_timeout(socket_path: &Path, timeout_ms: u64) -> Result<UnixStream, IpcError> {
     let stream = UnixStream::connect(socket_path)?;
     let timeout = Duration::from_millis(timeout_ms);

@@ -19,7 +19,6 @@ wayclick-ipc-client = { workspace = true }
 [dev-dependencies]
 tempfile = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
-wayclick-ipc-client = { workspace = true }
 
 [features]
 integration = []

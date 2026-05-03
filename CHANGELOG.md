@@ -2,6 +2,47 @@
 
 All notable changes to wayclick are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- New `wayclick-ipc-client` crate consolidates the IPC client logic that was
+  previously duplicated between `wayclick-core` and `wayclick-playground`.
+  Suitable for third-party tools that want to talk to the daemon without
+  pulling in the full `wayclick-core` library. Exposes `frame::*` primitives,
+  `socket::default_socket_path`, `SyncClient` for blocking RPC,
+  `connect_with_timeout` for streaming sockets, and `AsyncClient` for
+  background-thread event streaming with typed `IpcMessage` events.
+
+### Changed
+
+- `wayclick-tui` now depends on `wayclick-ipc-client` instead of
+  `wayclick-core`.
+- `wayclickctl` drops `wayclick-core` entirely and uses the new crate for
+  one-shot RPC plus its hand-rolled waybar streaming subscribe loops.
+- `wayclick-playground` uses `wayclick-ipc-client::AsyncClient`; the
+  in-tree `src/ipc_client.rs` (556 lines) is removed.
+- `wayclick-core` server-side IPC is unchanged in behavior; it now imports
+  the frame primitives from `wayclick-ipc-client` (single source of truth).
+
+### Fixed
+
+- `ServiceStatus.active_triggers` is now `Vec<String>` (the trigger IDs)
+  rather than the previously-incorrect `usize`. The playground's hand-rolled
+  parser silently defaulted this field to 0 because of the type mismatch;
+  the new typed deserialization surfaces the actual list.
+
+### Removed
+
+- `wayclick_core::ipc::ipc_request` and `ipc_connect` — these client-side
+  helpers moved to `wayclick_ipc_client::SyncClient` and
+  `wayclick_ipc_client::connect_with_timeout`.
+- The frame primitives `encode_frame` / `decode_frame` / `write_frame` /
+  `IpcError` / `MAX_FRAME_SIZE` likewise moved to
+  `wayclick_ipc_client::frame`.
+
+---
+
 ## Repository History
 
 The git history for this repository was collapsed before the initial public release to preserve privacy during early development. The v0.1.0 tag represents the first public version.
