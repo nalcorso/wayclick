@@ -100,6 +100,27 @@ fn connect_with_timeout_returns_io_error_when_socket_missing() {
 }
 
 #[test]
+fn connect_with_timeout_zero_means_no_timeout() {
+    use std::os::unix::net::UnixListener;
+    use std::time::SystemTime;
+    let dir = std::env::temp_dir();
+    let nonce = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let path = dir.join(format!("wayclick-connect-zero-{}.sock", nonce));
+    let _ = std::fs::remove_file(&path);
+    let _listener = UnixListener::bind(&path).unwrap();
+
+    let stream = wayclick_ipc_client::connect_with_timeout(&path, 0)
+        .expect("zero timeout should not be rejected");
+    assert_eq!(stream.read_timeout().unwrap(), None);
+    assert_eq!(stream.write_timeout().unwrap(), None);
+    drop(stream);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn sync_request_returns_io_error_when_socket_missing() {
     let path = PathBuf::from("/tmp/wayclick-nonexistent-test.sock");
     let _ = std::fs::remove_file(&path);

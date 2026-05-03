@@ -24,6 +24,12 @@ All notable changes to wayclick are documented in this file.
   in-tree `src/ipc_client.rs` (556 lines) is removed.
 - `wayclick-core` server-side IPC is unchanged in behavior; it now imports
   the frame primitives from `wayclick-ipc-client` (single source of truth).
+- `IpcCommand` on the new `AsyncClient` is generic — only `Send(Value)` and
+  `Shutdown`. The playground's previous domain-specific variants
+  (`FireTrigger`, `EnableTrigger`, `DisableTrigger`, `RefreshTriggers`) are
+  gone; equivalent calls are now `client.send("trigger", Some(json!(…)))`,
+  `client.send("enable_trigger", Some(json!(…)))`, etc. External
+  consumers forking the playground should adjust accordingly.
 
 ### Fixed
 

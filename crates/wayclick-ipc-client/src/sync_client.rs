@@ -62,14 +62,17 @@ impl SyncClient {
 /// subscribe loops that don't fit the [`AsyncClient`](crate::AsyncClient)
 /// handshake. Most callers want [`SyncClient::request`] or [`AsyncClient`] instead.
 ///
-/// `timeout_ms` is applied to both reads and writes. A value of `0` sets
-/// `Duration::from_millis(0)` on the stream, which the kernel treats as
-/// "no timeout" — useful for streaming connections that will manage their
-/// own timeouts (e.g. by switching the stream to non-blocking mode).
+/// `timeout_ms` is applied to both reads and writes. A value of `0` means
+/// "no timeout" — the stream is connected without any timeout configured,
+/// suitable for callers that will switch the stream to non-blocking mode
+/// or set their own timeouts afterward. For non-zero values the call
+/// returns an error if the OS rejects the duration.
 pub fn connect_with_timeout(socket_path: &Path, timeout_ms: u64) -> Result<UnixStream, IpcError> {
     let stream = UnixStream::connect(socket_path)?;
-    let timeout = Duration::from_millis(timeout_ms);
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
+    if timeout_ms != 0 {
+        let timeout = Duration::from_millis(timeout_ms);
+        stream.set_read_timeout(Some(timeout))?;
+        stream.set_write_timeout(Some(timeout))?;
+    }
     Ok(stream)
 }
