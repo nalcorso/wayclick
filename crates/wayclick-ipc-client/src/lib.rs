@@ -16,3 +16,6 @@ pub mod socket;
 
 pub mod types;
 pub use types::{FocusedWindow, ServiceStatus, TriggerInfo};
+
+pub mod sync_client;
+pub use sync_client::SyncClient;
