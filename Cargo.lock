@@ -1556,6 +1556,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "wayclick-ipc-client"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+]
+
+[[package]]
 name = "wayclick-playground"
 version = "0.1.0"
 dependencies = [
