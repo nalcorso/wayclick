@@ -3,11 +3,11 @@
 // the macroquad main loop via mpsc channels.
 
 use crate::events::{EventRing, InputEvent};
-use crate::ipc_client::{FocusedWindow, IpcCommand, IpcMessage, ServiceStatus, TriggerInfo};
 use crate::particles::ParticleSystem;
 use crate::perf::PerfCounters;
 use macroquad::prelude::MouseButton;
-use std::sync::mpsc::{Receiver, Sender};
+use serde_json::json;
+use wayclick_ipc_client::{AsyncClient, FocusedWindow, IpcMessage, ServiceStatus, TriggerInfo};
 
 /// Whether the IPC connection to the wayclick daemon is available.
 #[derive(Debug, Clone, PartialEq)]
@@ -43,12 +43,11 @@ pub struct AppState {
     pub triggers_expanded: bool,
     pub log_expanded: bool,
 
-    ipc_rx: Receiver<IpcMessage>,
-    ipc_cmd_tx: Sender<IpcCommand>,
+    ipc: AsyncClient,
 }
 
 impl AppState {
-    pub fn new(ipc_rx: Receiver<IpcMessage>, ipc_cmd_tx: Sender<IpcCommand>) -> Self {
+    pub fn new(ipc: AsyncClient) -> Self {
         Self {
             connection: ConnectionStatus::Connecting,
             service_enabled: false,
@@ -61,8 +60,7 @@ impl AppState {
             focus_expanded: true,
             triggers_expanded: true,
             log_expanded: true,
-            ipc_rx,
-            ipc_cmd_tx,
+            ipc,
         }
     }
 
@@ -76,7 +74,7 @@ impl AppState {
         perf: &mut PerfCounters,
         particles: &mut ParticleSystem,
     ) {
-        while let Ok(msg) = self.ipc_rx.try_recv() {
+        while let Ok(Some(msg)) = self.ipc.try_recv() {
             match msg {
                 IpcMessage::Connected {
                     status,
@@ -202,8 +200,8 @@ impl AppState {
     #[allow(dead_code)]
     pub fn fire_trigger(&self, id: &str) {
         let _ = self
-            .ipc_cmd_tx
-            .send(IpcCommand::FireTrigger(id.to_string()));
+            .ipc
+            .send("trigger", Some(json!({"id": id.to_string(), "press": true})));
     }
 
     /// Toggle a trigger's `user_enabled` state via IPC.
@@ -215,17 +213,17 @@ impl AppState {
         let id = entry.info.id.clone();
         if entry.info.user_enabled {
             entry.info.user_enabled = false;
-            let _ = self.ipc_cmd_tx.send(IpcCommand::DisableTrigger(id));
+            let _ = self.ipc.send("disable_trigger", Some(json!({"id": id})));
         } else {
             entry.info.user_enabled = true;
-            let _ = self.ipc_cmd_tx.send(IpcCommand::EnableTrigger(id));
+            let _ = self.ipc.send("enable_trigger", Some(json!({"id": id})));
         }
     }
 
     /// Request a fresh trigger list from the daemon.
     #[allow(dead_code)]
     pub fn refresh_triggers(&self) {
-        let _ = self.ipc_cmd_tx.send(IpcCommand::RefreshTriggers);
+        let _ = self.ipc.send("list_triggers", None);
     }
 
     fn apply_status(&mut self, status: &ServiceStatus) {

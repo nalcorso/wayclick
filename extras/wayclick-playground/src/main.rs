@@ -4,14 +4,13 @@ use macroquad::prelude::*;
 mod app_state;
 mod colors;
 mod events;
-mod ipc_client;
 mod particles;
 mod perf;
 mod ui;
 
 use app_state::{AppState, ConnectionStatus};
 use events::EventRing;
-use ipc_client::spawn_ipc_thread;
+use wayclick_ipc_client::{socket::default_socket_path, AsyncClient};
 use particles::ParticleSystem;
 use perf::PerfCounters;
 use ui::SidebarLayout;
@@ -45,8 +44,9 @@ async fn main() {
     let start_time = get_time();
 
     // Spawn IPC background thread and initialise application state
-    let (ipc_rx, ipc_cmd_tx) = spawn_ipc_thread();
-    let mut app_state = AppState::new(ipc_rx, ipc_cmd_tx);
+    let ipc_client = AsyncClient::connect(default_socket_path())
+        .expect("failed to spawn IPC client thread");
+    let mut app_state = AppState::new(ipc_client);
 
     // Render target for bloom pass
     let mut bloom_target = render_target(screen_width() as u32, screen_height() as u32);
