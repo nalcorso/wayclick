@@ -1590,7 +1590,7 @@ dependencies = [
  "crossterm",
  "ratatui",
  "serde_json",
- "wayclick-core",
+ "wayclick-ipc-client",
 ]
 
 [[package]]

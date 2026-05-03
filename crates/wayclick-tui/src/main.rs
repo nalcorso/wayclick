@@ -15,7 +15,7 @@ use ratatui::{
 use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use wayclick_core::ipc;
+use wayclick_ipc_client::SyncClient;
 
 // Catppuccin Mocha palette
 const BASE: Color = Color::Rgb(30, 30, 46);
@@ -92,7 +92,7 @@ impl App {
         self.last_error = None;
 
         // Fetch status
-        match ipc::ipc_request(&self.socket_path, "status_json", None) {
+        match SyncClient::request(&self.socket_path, "status_json", None) {
             Ok(resp) => {
                 if let Some(result) = resp.get("result") {
                     self.enabled = result
@@ -155,7 +155,7 @@ impl App {
         }
 
         // Fetch trigger list (result is a direct array)
-        match ipc::ipc_request(&self.socket_path, "list_triggers", None) {
+        match SyncClient::request(&self.socket_path, "list_triggers", None) {
             Ok(resp) => {
                 if let Some(result) = resp.get("result") {
                     let triggers_arr = result.as_array();
@@ -194,7 +194,7 @@ impl App {
 
         // Fetch logs (result is array of {level, message, timestamp} objects)
         let params = serde_json::json!({"n": 50});
-        match ipc::ipc_request(&self.socket_path, "logs_tail", Some(params)) {
+        match SyncClient::request(&self.socket_path, "logs_tail", Some(params)) {
             Ok(resp) => {
                 if let Some(result) = resp.get("result") {
                     if let Some(logs) = result.as_array() {
@@ -225,14 +225,14 @@ impl App {
 
     fn toggle_enabled(&mut self) {
         let method = if self.enabled { "disable" } else { "enable" };
-        match ipc::ipc_request(&self.socket_path, method, None) {
+        match SyncClient::request(&self.socket_path, method, None) {
             Ok(_) => self.enabled = !self.enabled,
             Err(e) => self.last_error = Some(format!("Toggle: {}", e)),
         }
     }
 
     fn reload_config(&mut self) {
-        match ipc::ipc_request(&self.socket_path, "reload_config", None) {
+        match SyncClient::request(&self.socket_path, "reload_config", None) {
             Ok(_) => {}
             Err(e) => self.last_error = Some(format!("Reload: {}", e)),
         }
@@ -241,7 +241,7 @@ impl App {
     fn fire_selected(&mut self) {
         if let Some(trigger) = self.selected_trigger().cloned() {
             let params = serde_json::json!({"id": trigger.id, "press": true});
-            match ipc::ipc_request(&self.socket_path, "trigger", Some(params)) {
+            match SyncClient::request(&self.socket_path, "trigger", Some(params)) {
                 Ok(_) => {}
                 Err(e) => self.last_error = Some(format!("Fire: {}", e)),
             }
@@ -276,7 +276,7 @@ impl App {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let socket_path = wayclick_core::config::default_socket_path();
+    let socket_path = wayclick_ipc_client::socket::default_socket_path();
 
     // Set up terminal
     enable_raw_mode()?;
