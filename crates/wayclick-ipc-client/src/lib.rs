@@ -13,3 +13,6 @@ pub mod frame;
 pub use frame::{IpcError, MAX_FRAME_SIZE};
 
 pub mod socket;
+
+pub mod types;
+pub use types::{FocusedWindow, ServiceStatus, TriggerInfo};
