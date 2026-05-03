@@ -16,8 +16,8 @@ pub struct ServiceStatus {
     pub enabled: bool,
     /// Total number of triggers configured.
     pub trigger_count: usize,
-    /// Number of currently-active (held / latched) triggers.
-    pub active_triggers: usize,
+    /// IDs of currently-active (held / latched) triggers.
+    pub active_triggers: Vec<String>,
     /// Active layer name (e.g. `"default"`).
     pub layer: String,
     /// Daemon uptime in seconds.
@@ -46,7 +46,12 @@ pub struct TriggerInfo {
     pub dynamic: bool,
 }
 
-/// Currently-focused window, as reported by `get_focus` and `focus_changed` events.
+/// Currently-focused window.
+///
+/// This is the inner shape — the daemon's `get_focus` method returns
+/// `{"window": <FocusedWindow | null>}`, and `focus_changed` events carry
+/// the same shape under `params.window`. Callers must extract that field
+/// before deserializing.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FocusedWindow {
