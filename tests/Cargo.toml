@@ -8,9 +8,11 @@ publish = false
 
 [dependencies]
 wayclick-core = { workspace = true }
+wayclick-ipc-client = { workspace = true }
 serde_json = { workspace = true }
 
 [dev-dependencies]
 wayclick-core = { workspace = true }
+wayclick-ipc-client = { workspace = true }
 serde_json = { workspace = true }
 tempfile = "3"

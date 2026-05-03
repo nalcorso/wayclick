@@ -1543,6 +1543,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror",
+ "wayclick-ipc-client",
 ]
 
 [[package]]
@@ -1579,6 +1580,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "wayclick-core",
+ "wayclick-ipc-client",
 ]
 
 [[package]]
@@ -1597,7 +1599,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "serde_json",
- "wayclick-core",
+ "wayclick-ipc-client",
 ]
 
 [[package]]

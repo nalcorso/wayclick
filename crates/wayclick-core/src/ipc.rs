@@ -6,14 +6,14 @@ use crate::focus_tracker::FocusTracker;
 use crate::logger::Logger;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::io::{self, Read, Write};
+use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
-use thiserror::Error;
+use wayclick_ipc_client::frame::{decode_frame, write_frame, IpcError};
 
 /// Maximum concurrent IPC client connections.
 /// Prevents connection flood attacks from exhausting system threads.
@@ -25,61 +25,6 @@ const MAX_IPC_CONNECTIONS: usize = 32;
 const JSONRPC_INTERNAL_ERROR: i32 = -32000;
 const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
 const JSONRPC_INVALID_PARAMS: i32 = -32602;
-
-#[derive(Debug, Error)]
-pub enum IpcError {
-    #[error("IO error: {0}")]
-    Io(#[from] io::Error),
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
-    #[error("Frame too large: {0} bytes (max 65536)")]
-    FrameTooLarge(u32),
-    #[error("Connection closed")]
-    ConnectionClosed,
-}
-
-const MAX_FRAME_SIZE: u32 = 65536;
-
-/// Encode a JSON-RPC frame with 4-byte big-endian length prefix.
-pub fn encode_frame(payload: &Value) -> Result<Vec<u8>, IpcError> {
-    let json_bytes = serde_json::to_vec(payload)?;
-    let len = json_bytes.len() as u32;
-    if len > MAX_FRAME_SIZE {
-        return Err(IpcError::FrameTooLarge(len));
-    }
-    let mut frame = Vec::with_capacity(4 + json_bytes.len());
-    frame.extend_from_slice(&len.to_be_bytes());
-    frame.extend_from_slice(&json_bytes);
-    Ok(frame)
-}
-
-/// Decode a length-prefixed JSON-RPC frame from a reader.
-pub fn decode_frame(reader: &mut impl Read) -> Result<Value, IpcError> {
-    let mut len_buf = [0u8; 4];
-    reader.read_exact(&mut len_buf).map_err(|e| {
-        if e.kind() == io::ErrorKind::UnexpectedEof {
-            IpcError::ConnectionClosed
-        } else {
-            IpcError::Io(e)
-        }
-    })?;
-    let len = u32::from_be_bytes(len_buf);
-    if len > MAX_FRAME_SIZE {
-        return Err(IpcError::FrameTooLarge(len));
-    }
-    let mut payload = vec![0u8; len as usize];
-    reader.read_exact(&mut payload)?;
-    let value: Value = serde_json::from_slice(&payload)?;
-    Ok(value)
-}
-
-/// Write a frame to a writer.
-pub fn write_frame(writer: &mut impl Write, payload: &Value) -> Result<(), IpcError> {
-    let frame = encode_frame(payload)?;
-    writer.write_all(&frame)?;
-    writer.flush()?;
-    Ok(())
-}
 
 fn make_response(id: Option<&Value>, result: Value) -> Value {
     json!({
@@ -700,37 +645,6 @@ fn parse_event_filter(params: Option<&Value>) -> Option<Vec<EventType>> {
     }
 }
 
-/// Client-side helper: connect to daemon socket with read/write timeouts set.
-/// Returns a connected `UnixStream` that callers can use for framed IPC communication.
-/// Use this for long-lived streaming connections (e.g. event subscriptions).
-pub fn ipc_connect(socket_path: &Path, timeout_ms: u64) -> Result<UnixStream, IpcError> {
-    let stream = UnixStream::connect(socket_path)?;
-    let timeout = Duration::from_millis(timeout_ms);
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(timeout))?;
-    Ok(stream)
-}
-
-/// Client-side helper: connect to daemon and send a single request, return response.
-pub fn ipc_request(
-    socket_path: &Path,
-    method: &str,
-    params: Option<Value>,
-) -> Result<Value, IpcError> {
-    let mut stream = ipc_connect(socket_path, 5000)?;
-
-    let request = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": method,
-        "params": params.unwrap_or(json!(null)),
-    });
-
-    write_frame(&mut stream, &request)?;
-    let response = decode_frame(&mut stream)?;
-    Ok(response)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -754,33 +668,6 @@ mod tests {
             "test".into(),
         )));
         (logger, engine)
-    }
-
-    #[test]
-    fn test_frame_encode_decode() {
-        let payload = json!({"jsonrpc": "2.0", "id": 1, "method": "ping"});
-        let encoded = encode_frame(&payload).unwrap();
-
-        let mut cursor = io::Cursor::new(encoded);
-        let decoded = decode_frame(&mut cursor).unwrap();
-
-        assert_eq!(payload, decoded);
-    }
-
-    #[test]
-    fn test_frame_encode_decode_roundtrip() {
-        let payloads = vec![
-            json!({"method": "status"}),
-            json!({"result": {"enabled": true, "triggers": [1,2,3]}}),
-            json!({"error": {"code": -32601, "message": "not found"}}),
-        ];
-
-        for payload in payloads {
-            let encoded = encode_frame(&payload).unwrap();
-            let mut cursor = io::Cursor::new(encoded);
-            let decoded = decode_frame(&mut cursor).unwrap();
-            assert_eq!(payload, decoded);
-        }
     }
 
     #[test]
@@ -890,7 +777,7 @@ mod tests {
         for _ in 0..10 {
             let path = socket_path.clone();
             handles.push(thread::spawn(move || {
-                let response = ipc_request(&path, "ping", None).unwrap();
+                let response = wayclick_ipc_client::SyncClient::request(&path, "ping", None).unwrap();
                 assert_eq!(response["result"], "pong");
             }));
         }

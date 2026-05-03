@@ -10,7 +10,7 @@ mod tests {
 
     use serde_json::json;
     use wayclick_core::config::Config;
-    use wayclick_core::ipc::ipc_request;
+    use wayclick_ipc_client::SyncClient;
 
     use crate::helpers::{ipc_call_raw, TestDaemon};
 
@@ -103,7 +103,7 @@ mod tests {
                 let b = barrier.clone();
                 thread::spawn(move || {
                     b.wait(); // all threads start at the same time
-                    let resp = ipc_request(&path, "ping", None).unwrap();
+                    let resp = SyncClient::request(&path, "ping", None).unwrap();
                     assert_eq!(resp["result"], "pong");
                 })
             })
@@ -134,7 +134,7 @@ mod tests {
         }
 
         // The (MAX+1)-th connection should be rejected
-        let result = ipc_request(&socket_path, "ping", None);
+        let result = SyncClient::request(&socket_path, "ping", None);
         assert!(
             result.is_err(),
             "Connection beyond MAX_IPC_CONNECTIONS should be rejected"

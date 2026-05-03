@@ -9,7 +9,7 @@ mod tests {
     use serde_json::json;
     use wayclick_core::config::{ActionConfig, Config, TriggerBinding, TriggerMode};
     use wayclick_core::engine::with_engine_events;
-    use wayclick_core::ipc::decode_frame;
+    use wayclick_ipc_client::frame::decode_frame;
 
     use crate::helpers::{ipc_call_raw, wait_for_event, TestDaemon};
 
@@ -147,7 +147,7 @@ mod tests {
 
         // Enable on same socket — triggers enabled_changed event + response on same socket
         let req = json!({"jsonrpc":"2.0","id":2,"method":"enable","params":{}});
-        wayclick_core::ipc::write_frame(&mut sock, &req).unwrap();
+        wayclick_ipc_client::frame::write_frame(&mut sock, &req).unwrap();
 
         // Drain until we have both the enable response (id=2) and the enabled_changed event
         let mut got_response = false;

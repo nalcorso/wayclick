@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::io::Cursor;
 use std::os::unix::net::UnixStream;
 
-use wayclick_core::ipc::{decode_frame, encode_frame};
+use wayclick_ipc_client::frame::{decode_frame, encode_frame};
 
 fn small_payload() -> Value {
     json!({

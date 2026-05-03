@@ -13,7 +13,9 @@ use wayclick_core::config::Config;
 use wayclick_core::engine::Engine;
 use wayclick_core::event_bus::EventBus;
 use wayclick_core::input_backend::{BackendCall, InputBackend, MockBackend};
-use wayclick_core::ipc::{decode_frame, ipc_request, write_frame, IpcServer};
+use wayclick_core::ipc::IpcServer;
+use wayclick_ipc_client::frame::{decode_frame, write_frame};
+use wayclick_ipc_client::SyncClient;
 use wayclick_core::logger::{LogLevel, Logger};
 
 pub struct TestDaemon {
@@ -87,7 +89,7 @@ impl TestDaemon {
 
     /// Single-shot IPC call — opens a new connection, sends the request, returns the response.
     pub fn ipc(&self, method: &str, params: Option<Value>) -> Value {
-        ipc_request(&self.socket_path, method, params).expect("ipc_request failed")
+        SyncClient::request(&self.socket_path, method, params).expect("ipc_request failed")
     }
 
     /// Open a persistent UnixStream with a 5-second read timeout.

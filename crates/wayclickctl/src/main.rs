@@ -3,8 +3,9 @@ use clap::{Parser, Subcommand, ValueEnum};
 use std::io;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
-use wayclick_core::config::default_socket_path;
-use wayclick_core::ipc::{decode_frame, ipc_connect, ipc_request, write_frame};
+use wayclick_ipc_client::frame::{decode_frame, write_frame};
+use wayclick_ipc_client::socket::default_socket_path;
+use wayclick_ipc_client::{connect_with_timeout, SyncClient};
 
 #[derive(Parser)]
 #[command(name = "wayclickctl", about = "Wayclick daemon control CLI")]
@@ -148,43 +149,43 @@ fn main() {
     };
 
     let result = match &cli.command {
-        Command::Ping => ipc_request(&socket_path, "ping", None),
-        Command::Status => ipc_request(&socket_path, "status", None),
-        Command::Toggle => ipc_request(&socket_path, "toggle", None),
-        Command::Enable => ipc_request(&socket_path, "enable", None),
-        Command::Disable => ipc_request(&socket_path, "disable", None),
+        Command::Ping => SyncClient::request(&socket_path, "ping", None),
+        Command::Status => SyncClient::request(&socket_path, "status", None),
+        Command::Toggle => SyncClient::request(&socket_path, "toggle", None),
+        Command::Enable => SyncClient::request(&socket_path, "enable", None),
+        Command::Disable => SyncClient::request(&socket_path, "disable", None),
         Command::Trigger { action } => match action {
-            TriggerAction::Fire { id } => ipc_request(
+            TriggerAction::Fire { id } => SyncClient::request(
                 &socket_path,
                 "trigger",
                 Some(serde_json::json!({ "id": id, "press": true })),
             ),
-            TriggerAction::Enable { id } => ipc_request(
+            TriggerAction::Enable { id } => SyncClient::request(
                 &socket_path,
                 "enable_trigger",
                 Some(serde_json::json!({ "id": id })),
             ),
-            TriggerAction::Disable { id } => ipc_request(
+            TriggerAction::Disable { id } => SyncClient::request(
                 &socket_path,
                 "disable_trigger",
                 Some(serde_json::json!({ "id": id })),
             ),
         },
-        Command::List => ipc_request(&socket_path, "list_triggers", None),
-        Command::Reload => ipc_request(&socket_path, "reload_config", None),
-        Command::Logs { tail } => ipc_request(
+        Command::List => SyncClient::request(&socket_path, "list_triggers", None),
+        Command::Reload => SyncClient::request(&socket_path, "reload_config", None),
+        Command::Logs { tail } => SyncClient::request(
             &socket_path,
             "logs_tail",
             Some(serde_json::json!({ "n": tail })),
         ),
         Command::Layer { action } => match action {
-            LayerAction::Get => ipc_request(&socket_path, "get_layer", None),
-            LayerAction::Set { name } => ipc_request(
+            LayerAction::Get => SyncClient::request(&socket_path, "get_layer", None),
+            LayerAction::Set { name } => SyncClient::request(
                 &socket_path,
                 "set_layer",
                 Some(serde_json::json!({ "layer": name })),
             ),
-            LayerAction::List => ipc_request(&socket_path, "list_layers", None),
+            LayerAction::List => SyncClient::request(&socket_path, "list_layers", None),
             LayerAction::Cycle { backward } => {
                 run_layer_cycle(&socket_path, *backward);
                 return;
@@ -199,7 +200,7 @@ fn main() {
                 Ok(p) => p,
                 Err(_) => path.clone(),
             };
-            ipc_request(
+            SyncClient::request(
                 &socket_path,
                 "check_config",
                 Some(serde_json::json!({ "path": abs.to_string_lossy() })),
@@ -379,7 +380,7 @@ fn main() {
 // ── Layer cycle ────────────────────────────────────────────────────────────────
 
 fn run_layer_cycle(socket_path: &std::path::Path, backward: bool) {
-    let layers_resp = match ipc_request(socket_path, "list_layers", None) {
+    let layers_resp = match SyncClient::request(socket_path, "list_layers", None) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -415,7 +416,7 @@ fn run_layer_cycle(socket_path: &std::path::Path, backward: bool) {
     };
 
     let next_layer = &layers[next_idx];
-    match ipc_request(
+    match SyncClient::request(
         socket_path,
         "set_layer",
         Some(serde_json::json!({ "layer": next_layer })),
@@ -431,7 +432,7 @@ fn run_layer_cycle(socket_path: &std::path::Path, backward: bool) {
 // ── Watch (event stream) ───────────────────────────────────────────────────────
 
 fn run_watch(socket_path: &std::path::Path, json_output: bool) {
-    let mut stream = match ipc_connect(socket_path, 0) {
+    let mut stream = match connect_with_timeout(socket_path, 0) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Error: cannot connect to daemon: {}", e);
@@ -821,7 +822,7 @@ fn fetch_waybar_snapshot(socket_path: &std::path::Path, format: &WaybarFormat) -
     let mut state = WaybarState::default();
     state.layer = "base".to_string();
 
-    if let Ok(resp) = ipc_request(socket_path, "status", None) {
+    if let Ok(resp) = SyncClient::request(socket_path, "status", None) {
         if let Some(result) = resp.get("result") {
             apply_status(&mut state, result);
         } else {
@@ -832,12 +833,12 @@ fn fetch_waybar_snapshot(socket_path: &std::path::Path, format: &WaybarFormat) -
     }
 
     // Best-effort: get triggers and layers for rich tooltip.
-    if let Ok(resp) = ipc_request(socket_path, "list_triggers", None) {
+    if let Ok(resp) = SyncClient::request(socket_path, "list_triggers", None) {
         if let Some(result) = resp.get("result") {
             apply_triggers(&mut state, result);
         }
     }
-    if let Ok(resp) = ipc_request(socket_path, "list_layers", None) {
+    if let Ok(resp) = SyncClient::request(socket_path, "list_layers", None) {
         if let Some(result) = resp.get("result") {
             apply_layers(&mut state, result);
         }
@@ -847,8 +848,8 @@ fn fetch_waybar_snapshot(socket_path: &std::path::Path, format: &WaybarFormat) -
 }
 
 /// Returns true if an IPC error represents a read timeout.
-fn is_timeout_err(e: &wayclick_core::ipc::IpcError) -> bool {
-    use wayclick_core::ipc::IpcError;
+fn is_timeout_err(e: &wayclick_ipc_client::frame::IpcError) -> bool {
+    use wayclick_ipc_client::frame::IpcError;
     if let IpcError::Io(io_err) = e {
         io_err.kind() == io::ErrorKind::WouldBlock || io_err.kind() == io::ErrorKind::TimedOut
     } else {
@@ -885,10 +886,10 @@ fn waybar_streaming_session(
     format: &WaybarFormat,
     flash_duration: Duration,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use wayclick_core::ipc::IpcError;
+    use wayclick_ipc_client::frame::IpcError;
 
     // Use a generous timeout for the initialization phase.
-    let mut stream = ipc_connect(socket_path, 5000)?;
+    let mut stream = connect_with_timeout(socket_path, 5000)?;
 
     let mut next_id: u64 = 1;
     let mut state = WaybarState::default();
@@ -1105,7 +1106,7 @@ fn waybar_streaming_session(
     }
 }
 
-// Allow the UnixStream from ipc_connect to be used with set_read_timeout directly.
+// Allow the UnixStream from connect_with_timeout to be used with set_read_timeout directly.
 impl WaybarState {
     // silence dead_code: Instant is used in flash tuple
     #[allow(dead_code)]
