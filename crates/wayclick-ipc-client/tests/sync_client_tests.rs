@@ -70,6 +70,36 @@ fn sync_request_passes_params() {
 }
 
 #[test]
+fn connect_with_timeout_succeeds_against_listener() {
+    use std::os::unix::net::UnixListener;
+    use std::time::SystemTime;
+    let dir = std::env::temp_dir();
+    let nonce = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos();
+    let path = dir.join(format!("wayclick-connect-test-{}.sock", nonce));
+    let _ = std::fs::remove_file(&path);
+    let _listener = UnixListener::bind(&path).unwrap();
+
+    let stream = wayclick_ipc_client::connect_with_timeout(&path, 1000)
+        .expect("should connect to live listener");
+    drop(stream);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn connect_with_timeout_returns_io_error_when_socket_missing() {
+    let path = std::path::PathBuf::from("/tmp/wayclick-connect-nonexistent-test.sock");
+    let _ = std::fs::remove_file(&path);
+    let result = wayclick_ipc_client::connect_with_timeout(&path, 1000);
+    assert!(matches!(
+        result,
+        Err(wayclick_ipc_client::frame::IpcError::Io(_))
+    ));
+}
+
+#[test]
 fn sync_request_returns_io_error_when_socket_missing() {
     let path = PathBuf::from("/tmp/wayclick-nonexistent-test.sock");
     let _ = std::fs::remove_file(&path);

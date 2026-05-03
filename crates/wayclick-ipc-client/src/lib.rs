@@ -18,7 +18,7 @@ pub mod types;
 pub use types::{FocusedWindow, ServiceStatus, TriggerInfo};
 
 pub mod sync_client;
-pub use sync_client::SyncClient;
+pub use sync_client::{connect_with_timeout, SyncClient};
 
 pub mod async_client;
 pub use async_client::{AsyncClient, IpcCommand, IpcMessage};
