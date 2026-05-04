@@ -131,10 +131,8 @@ if [ $DRY_RUN -eq 0 ]; then
     echo "  4. View real-time status:"
     echo "     wayclick-tui"
     echo ""
-    echo "For detailed setup and troubleshooting, see:"
-    echo "  • docs/QUICKSTART.md"
-    echo "  • docs/PERMISSIONS.md"
-    echo "  • docs/TROUBLESHOOTING.md"
+    echo "For next steps and troubleshooting:"
+    echo "  • See README.md for quick start and examples"
 else
     echo "To proceed with installation, run:"
     echo "  $0"
