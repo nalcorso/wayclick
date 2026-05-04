@@ -55,7 +55,7 @@ if [ -f /etc/udev/rules.d/99-wayclick.rules ]; then
     echo "✓ udev rules installed"
 else
     echo "✗ udev rules NOT installed"
-    echo "  Fix: sudo cp udev/99-wayclick.rules /etc/udev/rules.d/"
+    echo "  Fix: sudo cp deployment/udev/99-wayclick.rules /etc/udev/rules.d/"
     ERRORS=$((ERRORS + 1))
 fi
 
@@ -73,7 +73,7 @@ if [ -f "$CONFIG" ]; then
     echo "✓ Config found at $CONFIG"
 else
     echo "✗ Config NOT found at $CONFIG"
-    echo "  Fix: cp config/init.lua ~/.config/wayclick/init.lua"
+    echo "  Fix: cp deployment/config/init.lua ~/.config/wayclick/init.lua"
     ERRORS=$((ERRORS + 1))
 fi
 

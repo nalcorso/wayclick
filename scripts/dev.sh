@@ -13,7 +13,7 @@ mkdir -p "$CONFIG_DIR"
 
 # Install example config if not present
 if [ ! -f "$CONFIG_DIR/init.lua" ]; then
-    cp "$PROJECT_DIR/config/init.lua" "$CONFIG_DIR/init.lua"
+    cp "$PROJECT_DIR/deployment/config/init.lua" "$CONFIG_DIR/init.lua"
     echo "✓ Installed example config to $CONFIG_DIR/init.lua"
 else
     echo "✓ Config already exists at $CONFIG_DIR/init.lua"

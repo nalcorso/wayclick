@@ -96,7 +96,7 @@ sudo groupadd -f wayclick
 sudo usermod -aG wayclick "$USER"
 
 # Install udev rules
-sudo cp udev/99-wayclick.rules /etc/udev/rules.d/
+sudo cp deployment/udev/99-wayclick.rules /etc/udev/rules.d/
 sudo udevadm control --reload && sudo udevadm trigger
 
 # Add yourself to input group for /dev/input/event* access
@@ -164,7 +164,7 @@ wayclickd --check-config ~/.config/wayclick/init.lua
 wayclickd
 
 # Or with systemd (runs at login)
-cp systemd/wayclickd.service ~/.config/systemd/user/
+cp deployment/systemd/wayclickd.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now wayclickd
 ```

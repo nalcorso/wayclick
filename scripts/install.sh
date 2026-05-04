@@ -90,7 +90,7 @@ run_cmd "→ Add $USER to wayclick group" sudo usermod -aG wayclick "$USER"
 run_cmd "→ Add $USER to input group" sudo usermod -aG input "$USER"
 echo "✓ Groups configured"
 
-run_cmd "→ Install udev rules to /etc/udev/rules.d/" sudo cp "$PROJECT_DIR/udev/99-wayclick.rules" /etc/udev/rules.d/
+run_cmd "→ Install udev rules to /etc/udev/rules.d/" sudo cp "$PROJECT_DIR/deployment/udev/99-wayclick.rules" /etc/udev/rules.d/
 run_cmd "→ Reload udev" sudo udevadm control --reload
 run_cmd "→ Trigger udev" sudo udevadm trigger
 echo "✓ udev rules installed"
@@ -99,7 +99,7 @@ echo "✓ udev rules installed"
 echo ""
 echo "Installing systemd service..."
 run_cmd "→ Create systemd user directory" mkdir -p "${HOME}/.config/systemd/user"
-run_cmd "→ Install service file" cp "$PROJECT_DIR/systemd/wayclickd.service" "${HOME}/.config/systemd/user/"
+run_cmd "→ Install service file" cp "$PROJECT_DIR/deployment/systemd/wayclickd.service" "${HOME}/.config/systemd/user/"
 run_cmd "→ Reload systemd" systemctl --user daemon-reload
 echo "✓ systemd service installed"
 
@@ -109,7 +109,7 @@ echo "Setting up configuration..."
 CONFIG_DIR="${HOME}/.config/wayclick"
 run_cmd "→ Create config directory" mkdir -p "$CONFIG_DIR/lua"
 if [ ! -f "$CONFIG_DIR/init.lua" ]; then
-    run_cmd "→ Install example config" cp "$PROJECT_DIR/config/init.lua" "$CONFIG_DIR/init.lua"
+    run_cmd "→ Install example config" cp "$PROJECT_DIR/deployment/config/init.lua" "$CONFIG_DIR/init.lua"
     echo "✓ Example config installed to $CONFIG_DIR/init.lua"
 else
     echo "✓ Config already exists at $CONFIG_DIR/init.lua (skipped)"
