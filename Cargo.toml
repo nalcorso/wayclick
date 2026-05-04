@@ -7,7 +7,7 @@ members = [
   "crates/wayclick-evdev-dump",
   "crates/wayclick-ipc-client",
   "extras/wayclick-playground",
-  "tests",
+  "tests/e2e",
 ]
 exclude = ["tests/fuzz"]
 resolver = "2"

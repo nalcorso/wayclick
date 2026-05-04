@@ -12,7 +12,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 serde_json = "1"
-wayclick-core = { path = "../../crates/wayclick-core" }
+wayclick-core = { path = "../crates/wayclick-core" }
 
 [[bin]]
 name = "fuzz_config_loader"
