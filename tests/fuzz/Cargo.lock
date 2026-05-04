@@ -496,6 +496,7 @@ dependencies = [
  "libfuzzer-sys",
  "serde_json",
  "wayclick-core",
+ "wayclick-ipc-client",
 ]
 
 [[package]]

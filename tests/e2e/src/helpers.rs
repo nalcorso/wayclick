@@ -14,9 +14,9 @@ use wayclick_core::engine::Engine;
 use wayclick_core::event_bus::EventBus;
 use wayclick_core::input_backend::{BackendCall, InputBackend, MockBackend};
 use wayclick_core::ipc::IpcServer;
+use wayclick_core::logger::{LogLevel, Logger};
 use wayclick_ipc_client::frame::{decode_frame, write_frame};
 use wayclick_ipc_client::SyncClient;
-use wayclick_core::logger::{LogLevel, Logger};
 
 pub struct TestDaemon {
     pub engine: Arc<Mutex<Engine>>,

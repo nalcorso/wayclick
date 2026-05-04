@@ -451,9 +451,11 @@ impl Engine {
 
         // Validate action constraints using a synthetic single-trigger config so
         // the same interval/depth/oneshot-only rules apply to dynamic triggers.
-        let mut synthetic = crate::config::Config::default();
-        synthetic.options = self.config.options.clone();
-        synthetic.triggers = vec![trigger.clone()];
+        let synthetic = crate::config::Config {
+            options: self.config.options.clone(),
+            triggers: vec![trigger.clone()],
+            ..Default::default()
+        };
         if let Err(errs) = crate::config::validate_config(&synthetic) {
             let msg = errs
                 .iter()

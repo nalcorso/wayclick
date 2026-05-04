@@ -111,7 +111,9 @@ impl AsyncClient {
 
     /// Receive the next event, blocking until one is available or the thread exits.
     pub fn recv(&self) -> Result<IpcMessage, IpcError> {
-        self.msg_rx.recv().map_err(|_: RecvError| IpcError::ConnectionClosed)
+        self.msg_rx
+            .recv()
+            .map_err(|_: RecvError| IpcError::ConnectionClosed)
     }
 
     /// Receive the next event without blocking. Returns `Ok(None)` if no event is queued.
@@ -131,11 +133,7 @@ impl AsyncClient {
 
 // ─── Supervisor: reconnects on disconnect, exits on Shutdown ──────────────────
 
-fn run_supervisor(
-    socket_path: PathBuf,
-    msg_tx: Sender<IpcMessage>,
-    cmd_rx: Receiver<IpcCommand>,
-) {
+fn run_supervisor(socket_path: PathBuf, msg_tx: Sender<IpcMessage>, cmd_rx: Receiver<IpcCommand>) {
     loop {
         let shutdown = run_connection(&socket_path, &msg_tx, &cmd_rx);
         if shutdown || msg_tx.send(IpcMessage::Disconnected).is_err() {
@@ -239,7 +237,8 @@ fn run_connection_inner(
                 if is_reload && pending_list_triggers.is_none() {
                     let id = next_id;
                     next_id += 1;
-                    let req = json!({"jsonrpc":"2.0","id":id,"method":"list_triggers","params":null});
+                    let req =
+                        json!({"jsonrpc":"2.0","id":id,"method":"list_triggers","params":null});
                     if write_frame_nonblocking(&mut stream, &req) {
                         pending_list_triggers = Some(id);
                     }

@@ -2,7 +2,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use std::io::Cursor;
-use wayclick_core::ipc::{decode_frame, encode_frame};
+use wayclick_ipc_client::frame::{decode_frame, encode_frame};
 
 fuzz_target!(|data: &[u8]| {
     // Test decode with arbitrary bytes — must not panic

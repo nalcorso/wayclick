@@ -2,7 +2,7 @@
 #![no_main]
 use libfuzzer_sys::fuzz_target;
 use std::path::PathBuf;
-use wayclick_core::config::{ButtonBinding, DeviceBinding, DeviceMatch};
+use wayclick_core::config::{DeviceBinding, DeviceMatch};
 use wayclick_core::evdev_monitor::match_device;
 use wayclick_core::evdev_source::DeviceInfo;
 
@@ -36,8 +36,7 @@ fuzz_target!(|data: &[u8]| {
         device_match: DeviceMatch::ByName {
             contains: name.clone(),
         },
-        button_bindings: vec![],
-        scroll_bindings: vec![],
+        bindings: vec![],
         exclusive: false,
     };
     let _ = match_device(&info, &binding_name);
@@ -47,8 +46,7 @@ fuzz_target!(|data: &[u8]| {
             vendor: vendor_id,
             product: product_id,
         },
-        button_bindings: vec![],
-        scroll_bindings: vec![],
+        bindings: vec![],
         exclusive: false,
     };
     let _ = match_device(&info, &binding_vid);
@@ -65,8 +63,7 @@ fuzz_target!(|data: &[u8]| {
                 },
             ],
         },
-        button_bindings: vec![],
-        scroll_bindings: vec![],
+        bindings: vec![],
         exclusive: false,
     };
     let _ = match_device(&info, &binding_any);

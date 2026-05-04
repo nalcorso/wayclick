@@ -17,7 +17,8 @@ fn service_status_deserializes_from_daemon_status_response() {
         "uptime_secs": 123,
         "dry_run": false,
     });
-    let status: ServiceStatus = from_value(value).expect("daemon status response should deserialize");
+    let status: ServiceStatus =
+        from_value(value).expect("daemon status response should deserialize");
     assert!(status.enabled);
     assert_eq!(status.trigger_count, 3);
     assert_eq!(
@@ -88,7 +89,8 @@ fn focused_window_handles_missing_process_name() {
         "backend": "x11",
         "xwayland": true,
     });
-    let window: FocusedWindow = from_value(value).expect("window without process_name should deserialize");
+    let window: FocusedWindow =
+        from_value(value).expect("window without process_name should deserialize");
     assert_eq!(window.app_id, "unknown");
     assert_eq!(window.process_name, None);
     assert!(window.xwayland);

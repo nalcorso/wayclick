@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -73,8 +74,10 @@ pub enum TriggerEdge {
     Release,
 }
 
-impl TriggerEdge {
-    pub fn from_str(s: &str) -> Result<Self, ConfigError> {
+impl FromStr for TriggerEdge {
+    type Err = ConfigError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "press" => Ok(TriggerEdge::Press),
             "release" => Ok(TriggerEdge::Release),

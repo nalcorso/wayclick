@@ -10,10 +10,10 @@ mod ui;
 
 use app_state::{AppState, ConnectionStatus};
 use events::EventRing;
-use wayclick_ipc_client::{socket::default_socket_path, AsyncClient};
 use particles::ParticleSystem;
 use perf::PerfCounters;
 use ui::SidebarLayout;
+use wayclick_ipc_client::{socket::default_socket_path, AsyncClient};
 
 fn window_conf() -> Conf {
     Conf {
@@ -44,8 +44,8 @@ async fn main() {
     let start_time = get_time();
 
     // Spawn IPC background thread and initialise application state
-    let ipc_client = AsyncClient::connect(default_socket_path())
-        .expect("failed to spawn IPC client thread");
+    let ipc_client =
+        AsyncClient::connect(default_socket_path()).expect("failed to spawn IPC client thread");
     let mut app_state = AppState::new(ipc_client);
 
     // Render target for bloom pass

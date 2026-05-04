@@ -199,9 +199,10 @@ impl AppState {
     /// Send a FireTrigger command for the given trigger ID.
     #[allow(dead_code)]
     pub fn fire_trigger(&self, id: &str) {
-        let _ = self
-            .ipc
-            .send("trigger", Some(json!({"id": id.to_string(), "press": true})));
+        let _ = self.ipc.send(
+            "trigger",
+            Some(json!({"id": id.to_string(), "press": true})),
+        );
     }
 
     /// Toggle a trigger's `user_enabled` state via IPC.

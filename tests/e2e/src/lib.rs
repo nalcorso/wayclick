@@ -21,9 +21,9 @@ mod integration {
     use serde_json::json;
     use wayclick_core::config::Config;
     use wayclick_core::engine::with_engine_events;
-    use wayclick_ipc_client::frame::decode_frame;
     use wayclick_core::logger::{LogLevel, Logger};
     use wayclick_core::lua_api::load_config;
+    use wayclick_ipc_client::frame::decode_frame;
 
     use crate::helpers::{ipc_call_raw, poll_until, TestDaemon};
 

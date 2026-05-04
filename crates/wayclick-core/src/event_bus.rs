@@ -2,6 +2,7 @@
 use crate::focus_tracker::WindowInfo;
 use crate::MutexExt;
 use serde::Serialize;
+use std::str::FromStr;
 use std::sync::mpsc;
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,6 +14,18 @@ fn now_ms() -> u64 {
         .unwrap_or_default()
         .as_millis() as u64
 }
+
+/// Error type for parsing EventType from strings.
+#[derive(Debug, Clone, Copy)]
+pub struct ParseEventTypeError;
+
+impl std::fmt::Display for ParseEventTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown event type")
+    }
+}
+
+impl std::error::Error for ParseEventTypeError {}
 
 /// All event types that the event bus can emit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -33,25 +46,35 @@ pub enum EventType {
     FocusChanged,
 }
 
-impl EventType {
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for EventType {
+    type Err = ParseEventTypeError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "trigger_activated" => Some(Self::TriggerActivated),
-            "trigger_deactivated" => Some(Self::TriggerDeactivated),
-            "layer_changed" => Some(Self::LayerChanged),
-            "enabled_changed" => Some(Self::EnabledChanged),
-            "config_reloaded" => Some(Self::ConfigReloaded),
-            "input_received" => Some(Self::InputReceived),
-            "scroll_received" => Some(Self::ScrollReceived),
-            "focus_changed" => Some(Self::FocusChanged),
-            _ => None,
+            "trigger_activated" => Ok(Self::TriggerActivated),
+            "trigger_deactivated" => Ok(Self::TriggerDeactivated),
+            "layer_changed" => Ok(Self::LayerChanged),
+            "enabled_changed" => Ok(Self::EnabledChanged),
+            "config_reloaded" => Ok(Self::ConfigReloaded),
+            "input_received" => Ok(Self::InputReceived),
+            "scroll_received" => Ok(Self::ScrollReceived),
+            "focus_changed" => Ok(Self::FocusChanged),
+            _ => Err(ParseEventTypeError),
         }
+    }
+}
+
+impl EventType {
+    /// Parse a string to EventType, returning None if invalid.
+    pub fn from_str_opt(s: &str) -> Option<Self> {
+        s.parse().ok()
     }
 }
 
 /// An event emitted by the engine.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum Event {
     TriggerActivated {
         trigger_id: String,
@@ -317,18 +340,18 @@ mod tests {
     #[test]
     fn test_event_type_from_str() {
         assert_eq!(
-            EventType::from_str("trigger_activated"),
+            EventType::from_str_opt("trigger_activated"),
             Some(EventType::TriggerActivated)
         );
         assert_eq!(
-            EventType::from_str("config_reloaded"),
+            EventType::from_str_opt("config_reloaded"),
             Some(EventType::ConfigReloaded)
         );
         assert_eq!(
-            EventType::from_str("scroll_received"),
+            EventType::from_str_opt("scroll_received"),
             Some(EventType::ScrollReceived)
         );
-        assert_eq!(EventType::from_str("unknown"), None);
+        assert_eq!(EventType::from_str_opt("unknown"), None);
     }
 
     #[test]

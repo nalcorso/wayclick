@@ -8,9 +8,9 @@ use macroquad::prelude::*;
 use crate::app_state::{ConnectionStatus, TriggerEntry};
 use crate::colors;
 use crate::events::EventRing;
-use wayclick_ipc_client::FocusedWindow;
 use crate::particles::ParticleSystem;
 use crate::perf::PerfCounters;
+use wayclick_ipc_client::FocusedWindow;
 
 // ─── Layout ───────────────────────────────────────────────────────────────
 

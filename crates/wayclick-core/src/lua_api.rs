@@ -5,6 +5,7 @@ use mlua::prelude::*;
 use std::cell::Cell;
 use std::path::Path;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::Arc;
 
 /// Maximum number of Lua VM instructions allowed during config loading.

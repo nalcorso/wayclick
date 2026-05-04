@@ -819,8 +819,10 @@ fn run_waybar(
 
 /// One-shot waybar output: fetch status (and triggers for rich tooltip).
 fn fetch_waybar_snapshot(socket_path: &std::path::Path, format: &WaybarFormat) -> String {
-    let mut state = WaybarState::default();
-    state.layer = "base".to_string();
+    let mut state = WaybarState {
+        layer: "base".to_string(),
+        ..Default::default()
+    };
 
     if let Ok(resp) = SyncClient::request(socket_path, "status", None) {
         if let Some(result) = resp.get("result") {
@@ -892,8 +894,10 @@ fn waybar_streaming_session(
     let mut stream = connect_with_timeout(socket_path, 5000)?;
 
     let mut next_id: u64 = 1;
-    let mut state = WaybarState::default();
-    state.layer = "base".to_string();
+    let mut state = WaybarState {
+        layer: "base".to_string(),
+        ..Default::default()
+    };
 
     // Subscribe to all events and fetch initial full state in a single burst.
     let id_sub = next_id;

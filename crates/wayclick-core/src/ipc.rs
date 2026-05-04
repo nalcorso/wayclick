@@ -460,6 +460,7 @@ fn handle_client_writer(mut stream: UnixStream, rx: std::sync::mpsc::Receiver<Wr
 
 /// Handle a JSON-RPC request with full connection context.
 /// Falls through to `handle_request` for methods that don't need connection state.
+#[allow(clippy::too_many_arguments)]
 fn handle_request_with_conn(
     request: &Value,
     engine: &Arc<Mutex<Engine>>,
@@ -636,7 +637,7 @@ fn parse_event_filter(params: Option<&Value>) -> Option<Vec<EventType>> {
     let types: Vec<EventType> = arr
         .iter()
         .filter_map(|v| v.as_str())
-        .filter_map(EventType::from_str)
+        .filter_map(EventType::from_str_opt)
         .collect();
     if types.is_empty() {
         None
@@ -777,7 +778,8 @@ mod tests {
         for _ in 0..10 {
             let path = socket_path.clone();
             handles.push(thread::spawn(move || {
-                let response = wayclick_ipc_client::SyncClient::request(&path, "ping", None).unwrap();
+                let response =
+                    wayclick_ipc_client::SyncClient::request(&path, "ping", None).unwrap();
                 assert_eq!(response["result"], "pong");
             }));
         }
