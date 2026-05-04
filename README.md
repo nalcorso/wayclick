@@ -231,25 +231,31 @@ wayclick.bind_device({
 
 **Trigger modes:**
 
-| Mode | Behaviour |
-|---|---|
-| `toggle` | First press starts, second stops |
-| `hold` | Active while button is held; stops on release |
-| `oneshot` | Fires once per press |
+| Icon | Mode | Behaviour |
+|---|---|---|
+| 🔄 | toggle | First press starts, second stops |
+| 👆 | hold | Active while button is held; stops on release |
+| 💥 | oneshot | Fires once per press |
 
-**Common actions:**
+**All actions:**
 
 | Action | Mode constraint | Description |
 |---|---|---|
-| `click` | oneshot | Single mouse click |
-| `auto_click` | toggle/hold/oneshot | Repeated clicks at an interval |
-| `keystroke` | oneshot only | Single key chord (key + modifiers) |
-| `type_text` | oneshot only | Type a string character by character |
-| `key_press` | toggle/hold/oneshot | Repeated key press at an interval |
-| `scroll` | toggle/hold/oneshot | Scroll wheel output |
-| `mouse_move` | toggle/hold/oneshot | Relative cursor movement |
-| `sequence` | any | Chain actions one after another with delays |
-| `delay` | — | Pause for a duration (use inside `sequence`) |
+| `click` | 💥 oneshot | Single mouse click |
+| `auto_click` | All | Repeated clicks at an interval with configurable jitter and hold duration |
+| `keystroke` | 💥 oneshot | Single key chord (key + optional modifiers) |
+| `type_text` | 💥 oneshot | Type a string character by character |
+| `key_press` | All | Repeated keyboard key presses at an interval |
+| `scroll` | All | Scroll wheel output |
+| `mouse_move` | All | Relative cursor movement |
+| `mouse_move_abs` | 💥 oneshot | Absolute cursor positioning |
+| `click_at` | 💥 oneshot | Move to absolute position and click |
+| `drag` | 💥 oneshot | Click-drag between two positions |
+| `set_layer` | 💥 oneshot | Switch active binding layer |
+| `media_key` | 💥 oneshot | Press a media key (volume, play/pause, etc.) |
+| `sequence` | All | Run actions one after another with delays |
+| `parallel` | 🔄 toggle / 👆 hold | Run actions simultaneously |
+| `delay` | N/A | Pause for a fixed duration (use inside `sequence`) |
 
 **Device matching options:**
 
