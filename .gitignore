@@ -21,3 +21,5 @@ target
 #.idea/
 bench-results/
 /fuzz
+tests/fuzz/corpus/
+tests/fuzz/artifacts/
