@@ -23,7 +23,7 @@ echo "=== deny ===" && cargo deny check
 [tasks.fuzz]
 description = "Run fuzz tests (requires nightly)"
 run = """
-cd fuzz
+cd tests/fuzz
 rustup run nightly cargo fuzz run fuzz_config_loader -- -max_total_time=60
 rustup run nightly cargo fuzz run fuzz_ipc_frame -- -max_total_time=60
 rustup run nightly cargo fuzz run fuzz_device_match -- -max_total_time=60

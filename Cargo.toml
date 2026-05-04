@@ -9,7 +9,7 @@ members = [
   "extras/wayclick-playground",
   "tests",
 ]
-exclude = ["fuzz"]
+exclude = ["tests/fuzz"]
 resolver = "2"
 
 [workspace.package]
