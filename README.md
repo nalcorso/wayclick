@@ -14,20 +14,29 @@ all. Write your config in Lua. Run it as a systemd service. Automate everything.
 
 ### Disclosures
 
-**AI Development** — This project was developed with AI assistance (Claude via GitHub Copilot) under human direction. Architecture decisions, security model, and feature design were human-directed; code generation and documentation were AI-assisted. Threat model and security decisions were thoroughly reviewed. See [CHANGELOG.md](CHANGELOG.md) for project history.
+**AI Development** — This project was developed with AI assistance (Claude via GitHub Copilot) under human direction. Architecture decisions, security model, and feature design were human-directed; code generation and documentation were AI-assisted. Threat model and security decisions were thoroughly reviewed. See [CHANGELOG.md](CHANGELOG.md) for project history. The commit history was collapsed when I decided to make this project public - this was a toy project with a lot of hard coded / personal information.
 
-**Language Choice** — Wayclick is written in Rust for practical reasons: performance, memory safety, and a mature ecosystem for systems programming. This is a pragmatic choice, not an ideological one.
+**Language Choice** — Wayclick is written in Rust for no good reason, I flipped a coin. My only ideological view when it comes to language decisions is 'Pick the right tool for the job'. If that turns out to be somthing different, I am on board.
 
 ---
 
-## What wayclick does
+## Features
 
-- **Scroll-to-click** — remap the scroll wheel to mouse clicks (the classic ARPG technique: scroll to rapid-fire left-click without wearing out the button)
-- **Auto-click** — toggle rapid clicking on/off with a side button, with configurable interval, jitter, and hold duration
-- **Macros** — type text, fire keystroke sequences, chain any combination of actions with delays
-- **Layer switching** — maintain separate binding sets and switch between them at runtime (base layer, combat layer, menu layer)
-- **Button chording** — bind actions to multi-button combos
-- **IPC control** — connect via Unix socket from scripts, game plugins, or external tools to register triggers and subscribe to events
+- **Kernel-level input binding** — Direct access to hardware buttons via Linux evdev; intercept and modify input at the kernel level before the OS sees it
+
+- **Flexible action composition** — Chain clicks, keystrokes, delays, mouse movements, and scrolling into complex automation sequences (e.g., scroll-to-click, rapid-fire automation, text macros)
+
+- **Per-device binding** — Match and bind any input device independently by name, VID:PID, or physical path; different devices can have completely different bindings
+
+- **Context switching** — Switch between entirely different binding sets at runtime (e.g., accessibility mode, gaming mode, work mode—all in one config)
+
+- **Programmatic control** — Register and unregister triggers dynamically via Unix socket IPC; integrate with external scripts, game plugins, or accessibility tools without restarting
+
+- **Display-server agnostic** — Works unchanged on Wayland, X11, or headless Linux; same configuration and behavior everywhere
+
+- **Hot-reload configuration** — Edit your Lua config and reload the daemon without restarting; dry-run mode for testing automation without emitting real events
+
+- **Anti-pattern features** — Optional jitter and timing randomization to avoid pattern detection in games with anti-cheat monitoring
 
 ## How it works
 
