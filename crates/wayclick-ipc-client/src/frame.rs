@@ -23,6 +23,16 @@ pub enum IpcError {
     FrameTooLarge(u32),
     #[error("Connection closed")]
     ConnectionClosed,
+    /// Daemon returned a JSON-RPC error response with an unexpected code.
+    /// Helpers that handle specific codes (e.g. `-32001` Unsupported)
+    /// collapse them into typed return values; anything else is surfaced
+    /// here so the caller can decide.
+    #[error("JSON-RPC error {code}: {message}")]
+    Rpc { code: i32, message: String },
+    /// Daemon returned a response with neither `result` nor `error` —
+    /// either a protocol violation or a version mismatch.
+    #[error("Malformed JSON-RPC response: {0}")]
+    MalformedResponse(String),
 }
 
 /// Encode a JSON value into a length-prefixed frame.

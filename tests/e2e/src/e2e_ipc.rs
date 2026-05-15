@@ -144,4 +144,59 @@ mod tests {
         drop(socks);
         daemon.teardown();
     }
+
+    /// `get_cursor_position` on a daemon without focus tracker support
+    /// surfaces JSONRPC_UNSUPPORTED (-32001) and `SyncClient::get_cursor_position`
+    /// collapses it to `Ok(None)`.
+    #[test]
+    fn test_get_cursor_position_unsupported_returns_none() {
+        let daemon = TestDaemon::new(Config::default());
+        let socket_path = daemon.socket_path.clone();
+
+        // Raw IPC: confirm the error code is exactly -32001.
+        let resp = daemon.ipc("get_cursor_position", None);
+        assert!(
+            resp.get("result").is_none(),
+            "expected no result, got {:?}",
+            resp
+        );
+        let code = resp["error"]["code"].as_i64();
+        assert_eq!(
+            code,
+            Some(-32001),
+            "expected JSONRPC_UNSUPPORTED (-32001), got {:?}",
+            resp
+        );
+
+        // Typed helper: should collapse -32001 to Ok(None).
+        let cursor = SyncClient::get_cursor_position(&socket_path).unwrap();
+        assert!(
+            cursor.is_none(),
+            "typed helper should collapse -32001 to None; got {:?}",
+            cursor
+        );
+
+        daemon.teardown();
+    }
+
+    /// `get_monitors` on a daemon without focus tracker support surfaces
+    /// JSONRPC_UNSUPPORTED (-32001) and the typed helper collapses it.
+    #[test]
+    fn test_get_monitors_unsupported_returns_none() {
+        let daemon = TestDaemon::new(Config::default());
+        let socket_path = daemon.socket_path.clone();
+
+        let resp = daemon.ipc("get_monitors", None);
+        assert_eq!(
+            resp["error"]["code"].as_i64(),
+            Some(-32001),
+            "expected JSONRPC_UNSUPPORTED (-32001), got {:?}",
+            resp
+        );
+
+        let monitors = SyncClient::get_monitors(&socket_path).unwrap();
+        assert!(monitors.is_none());
+
+        daemon.teardown();
+    }
 }

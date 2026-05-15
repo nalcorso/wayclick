@@ -23,6 +23,12 @@ const MAX_IPC_CONNECTIONS: usize = 32;
 /// `-32601` and `-32602` are spec-defined; `-32000` is in the implementation-defined
 /// server-error range and is used here for engine/runtime failures.
 const JSONRPC_INTERNAL_ERROR: i32 = -32000;
+/// Implementation-defined: the requested feature isn't supported by the
+/// daemon's current configuration (e.g. focus-tracker backend lacks cursor
+/// reporting). Distinct from `METHOD_NOT_FOUND` (which means the method
+/// name is unknown) so clients can branch on capability rather than parsing
+/// error messages.
+const JSONRPC_UNSUPPORTED: i32 = -32001;
 const JSONRPC_METHOD_NOT_FOUND: i32 = -32601;
 const JSONRPC_INVALID_PARAMS: i32 = -32602;
 
@@ -620,6 +626,64 @@ fn handle_request_with_conn(
                 .and_then(|ft| ft.get_current())
                 .map(|w| serde_json::to_value(&w).unwrap_or(json!(null)));
             make_response(id, json!({ "window": window.unwrap_or(json!(null)) }))
+        }
+
+        "get_cursor_position" => {
+            // Returns the current cursor position from the active focus-tracker
+            // backend. Hyprland implements this; Sway/none surface
+            // `JSONRPC_UNSUPPORTED` (-32001) so clients can fall back gracefully.
+            //
+            // The recorder CLI relies on this method to emit `wayclick.click_at`
+            // snippets with real screen coordinates at the instant of each
+            // mouse button press.
+            match focus_tracker {
+                Some(ft) if ft.supports_cursor_position() => match ft.cursor_position() {
+                    Some(pos) => make_response(id, json!({ "x": pos.x, "y": pos.y })),
+                    None => make_error(
+                        id,
+                        JSONRPC_INTERNAL_ERROR,
+                        "Cursor position momentarily unavailable",
+                    ),
+                },
+                _ => make_error(
+                    id,
+                    JSONRPC_UNSUPPORTED,
+                    "Cursor position not supported by the active focus-tracker backend",
+                ),
+            }
+        }
+
+        "get_monitors" => {
+            // Returns the list of monitors known to the active focus-tracker
+            // backend. Hyprland implements this; Sway/none surface
+            // `JSONRPC_UNSUPPORTED` so clients (notably wayclick-recorder)
+            // can fall back to emitting global coordinates.
+            match focus_tracker {
+                Some(ft) if ft.supports_monitors() => {
+                    let monitors = ft.monitors().unwrap_or_default();
+                    let arr: Vec<Value> = monitors
+                        .iter()
+                        .map(|m| {
+                            json!({
+                                "name": m.name,
+                                "description": m.description,
+                                "x": m.x,
+                                "y": m.y,
+                                "width": m.logical_width,
+                                "height": m.logical_height,
+                                "scale": m.scale,
+                                "transform": m.transform,
+                            })
+                        })
+                        .collect();
+                    make_response(id, json!({ "monitors": arr }))
+                }
+                _ => make_error(
+                    id,
+                    JSONRPC_UNSUPPORTED,
+                    "Monitor enumeration not supported by the active focus-tracker backend",
+                ),
+            }
         }
 
         _ => handle_request(request, engine, logger),

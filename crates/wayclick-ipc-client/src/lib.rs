@@ -15,7 +15,7 @@ pub use frame::{IpcError, MAX_FRAME_SIZE};
 pub mod socket;
 
 pub mod types;
-pub use types::{FocusedWindow, ServiceStatus, TriggerInfo};
+pub use types::{CursorPosition, FocusedWindow, MonitorInfo, ServiceStatus, TriggerInfo};
 
 pub mod sync_client;
 pub use sync_client::{connect_with_timeout, SyncClient};

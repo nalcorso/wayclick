@@ -63,3 +63,50 @@ pub struct FocusedWindow {
     /// True when the window is an XWayland surface.
     pub xwayland: bool,
 }
+
+/// Cursor position returned by the daemon's `get_cursor_position` IPC method.
+///
+/// Coordinates are in logical screen pixels. Only available when the daemon's
+/// focus-tracker backend supports cursor reporting (Hyprland today; Sway/none
+/// surface a `-32001 Unsupported` JSON-RPC error instead).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CursorPosition {
+    pub x: i32,
+    pub y: i32,
+}
+
+/// One monitor as reported by the daemon's `get_monitors` IPC method.
+///
+/// Coordinates are in the compositor's logical pixel layout (post-scale,
+/// post-transform). `(x, y)` is the top-left corner; `(width, height)` is
+/// the on-screen size. Only available when the focus-tracker backend
+/// supports monitor reporting (Hyprland today).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MonitorInfo {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    #[serde(default = "default_scale")]
+    pub scale: f64,
+    #[serde(default)]
+    pub transform: i32,
+}
+
+fn default_scale() -> f64 {
+    1.0
+}
+
+impl MonitorInfo {
+    /// `true` when `(gx, gy)` (compositor-global logical pixels) falls
+    /// inside this monitor's rectangle.
+    pub fn contains(&self, gx: i32, gy: i32) -> bool {
+        gx >= self.x
+            && gy >= self.y
+            && gx < self.x.saturating_add(self.width)
+            && gy < self.y.saturating_add(self.height)
+    }
+}
