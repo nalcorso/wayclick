@@ -6,6 +6,52 @@ All notable changes to wayclick are documented in this file.
 
 ### Added
 
+- **Monitor-aware coordinates** for `click_at` and `mouse_move_abs`. Both
+  actions now accept an optional `monitor = "<name>"` field; coordinates
+  given are interpreted as monitor-local pixels and the engine translates
+  them to global compositor pixels using the active focus tracker's
+  monitor layout. Omitting `monitor` keeps the previous global-coordinate
+  behaviour. Empty strings are treated as "no monitor specified".
+- **`zwlr_virtual_pointer_v1` pointer backend.** The daemon now binds the
+  Wayland virtual-pointer protocol when available and uses it for pointer
+  output, which is the only way to address multi-monitor layouts
+  correctly (a single uinput absolute-axis pointer cannot represent a
+  non-rectangular union of outputs). If the protocol is unavailable
+  (e.g. Sway without the unstable protocol enabled), the daemon logs a
+  warning and falls back to the existing uinput pointer. The daemon also
+  starts a background thread that re-queries the focus tracker every
+  2 seconds and pushes layout changes (hot-plug, resolution, rotation)
+  into the pointer backend without requiring a restart.
+- **New IPC methods:** `get_cursor_position` and `get_monitors`. Both
+  surface backend-specific data — currently Hyprland-only — and return
+  the new JSON-RPC error code `JSONRPC_UNSUPPORTED (-32001)` on backends
+  that can't answer. Typed helpers `SyncClient::get_cursor_position` /
+  `SyncClient::get_monitors` collapse `-32001` and `-32000` to
+  `Ok(None)` so callers can fall back gracefully.
+- **`extras/wayclick-recorder`** — new CLI that connects to a running
+  `wayclickd`, captures input events scoped to a focused window via the
+  daemon's `subscribe`/`get_focus` IPC, and emits replay-able Lua
+  snippets (`wayclick.click_at`, `wayclick.keystroke`, modifier-collapsed
+  combos, monitor-local coordinates). See `extras/wayclick-recorder/README.md`.
+- `AsyncClient::recv_timeout(Duration)` for consumers that want bounded
+  blocking instead of polling with `try_recv` + `sleep`.
+- New `IpcError` variants `Rpc { code, message }` and
+  `MalformedResponse(String)` distinguish daemon-reported failures from
+  protocol-level malformation.
+
+### Changed (Breaking)
+
+- **`Composite::Sequence` now loops under `toggle` and `hold` modes.**
+  Previously a `wayclick.sequence(...)` action ran once when triggered;
+  it now loops while the toggle is on / the binding is held, matching
+  user expectations for "macro that keeps running". The `oneshot` mode
+  is unchanged (still runs the sequence exactly once). If you relied on
+  toggle/hold sequences running once, wrap the action in
+  `wayclick.sequence({ actions = { ... }, ... })` inside a oneshot
+  trigger instead.
+
+### Added
+
 - New `wayclick-ipc-client` crate consolidates the IPC client logic that was
   previously duplicated between `wayclick-core` and `wayclick-playground`.
   Suitable for third-party tools that want to talk to the daemon without

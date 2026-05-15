@@ -248,12 +248,12 @@ wayclick.bind_device({
 | `key_press` | All | Repeated keyboard key presses at an interval |
 | `scroll` | All | Scroll wheel output |
 | `mouse_move` | All | Relative cursor movement |
-| `mouse_move_abs` | 💥 oneshot | Absolute cursor positioning |
-| `click_at` | 💥 oneshot | Move to absolute position and click |
+| `mouse_move_abs` | 💥 oneshot | Absolute cursor positioning (optional `monitor = "DP-2"` for per-output coords) |
+| `click_at` | 💥 oneshot | Move to absolute position and click (optional `monitor = "DP-2"` for per-output coords) |
 | `drag` | 💥 oneshot | Click-drag between two positions |
 | `set_layer` | 💥 oneshot | Switch active binding layer |
 | `media_key` | 💥 oneshot | Press a media key (volume, play/pause, etc.) |
-| `sequence` | All | Run actions one after another with delays |
+| `sequence` | All | Run actions one after another with delays; loops while active under `toggle`/`hold` modes (oneshot runs once) |
 | `parallel` | 🔄 toggle / 👆 hold | Run actions simultaneously |
 | `delay` | N/A | Pause for a fixed duration (use inside `sequence`) |
 
@@ -337,6 +337,46 @@ echo '{"jsonrpc":"2.0","id":1,"method":"ping","params":{}}' | \
   nc -U "$XDG_RUNTIME_DIR/wayclick.sock" | head -c 1000
 ```
 
+### Backend-specific methods
+
+The daemon exposes two backend-specific helpers that the `wayclick-recorder`
+crate uses to translate captured input into Lua. Both are currently only
+implemented for the Hyprland focus tracker; other backends respond with
+JSON-RPC error code `-32001` (`JSONRPC_UNSUPPORTED`).
+
+| Method | Returns | Notes |
+| :--- | :--- | :--- |
+| `get_cursor_position` | `{ x, y }` global pixels | Hyprland only; transient failures use `-32000`. |
+| `get_monitors` | `{ monitors: [{ name, x, y, width, height, scale, transform, description }] }` | Logical (post-scale) pixels. Hyprland only. |
+
+Typed helpers `SyncClient::get_cursor_position` / `SyncClient::get_monitors`
+collapse the unsupported / transient codes to `Ok(None)` so callers can
+degrade gracefully.
+
+---
+
+## Multi-monitor support
+
+`click_at` and `mouse_move_abs` accept an optional `monitor` field for
+multi-output setups:
+
+```lua
+-- Coordinates resolve relative to DP-2's logical origin.
+wayclick.click_at({ x = 100, y = 200, monitor = "DP-2" })
+```
+
+Omit `monitor` and the coordinates are interpreted in global compositor
+pixels (the previous behaviour). Monitor names are reported by
+`hyprctl monitors -j` (Hyprland) and via the `get_monitors` IPC method.
+
+Under the hood the daemon prefers the Wayland `zwlr_virtual_pointer_v1`
+protocol when the compositor supports it (Hyprland, Wayfire, etc.). This
+is the only pointer backend that can correctly target multi-monitor
+layouts — a single uinput absolute-axis pointer cannot represent a
+non-rectangular union of outputs. If the protocol is unavailable
+(currently Sway), the daemon falls back to uinput and logs a warning;
+`click_at` may then miss the correct output on multi-monitor setups.
+
 ---
 
 ## Waybar integration
@@ -377,6 +417,7 @@ Three display formats are available: `minimal` (icon only), `normal` (icon + lay
 | `wayclick-tui` | TUI — real-time dashboard with trigger state and logs |
 | `wayclick-evdev-dump` | Diagnostic — list devices, monitor events, identify buttons |
 | `wayclick-playground` | Visual testing — GPU-accelerated input visualizer (see [`extras/wayclick-playground/`](extras/wayclick-playground/)) |
+| `wayclick-recorder` | Macro recording — captures input via IPC and emits replayable Lua snippets (see [`extras/wayclick-recorder/`](extras/wayclick-recorder/)) |
 
 ---
 
