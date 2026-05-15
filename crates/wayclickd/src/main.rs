@@ -138,7 +138,57 @@ fn main() {
         match uinput.init() {
             Ok(()) => {
                 logger.info("UinputBackend initialized successfully");
-                Arc::new(uinput)
+                let uinput_arc: Arc<dyn wayclick_core::input_backend::InputBackend> =
+                    Arc::new(uinput);
+
+                // Try to upgrade the pointer half to zwlr_virtual_pointer_v1. The
+                // uinput tablet-axis pointer cannot address multi-monitor layouts
+                // correctly — a single absolute-axis device can't represent a
+                // non-rectangular union of monitors, so clicks land on the wrong
+                // output. The Wayland pointer takes global compositor pixels via
+                // motion_absolute and is the only way to make `click_at` land on
+                // the correct monitor.
+                let initial_extents = compute_extents_from_focus_tracker(&focus_tracker);
+                logger.info(format!(
+                    "Initial pointer extents: {}×{} (from focus tracker)",
+                    initial_extents.width, initial_extents.height
+                ));
+                let pointer: Arc<dyn wayclick_core::pointer_backend::PointerBackend> =
+                    match wayclick_core::wlr_pointer::WlrVirtualPointer::try_new(
+                        logger.clone(),
+                        initial_extents,
+                    ) {
+                        Ok(wlr) => {
+                            logger.info(
+                                "Pointer backend: zwlr_virtual_pointer_v1 (Wayland native, \
+                                 multi-monitor accurate).",
+                            );
+                            let wlr = Arc::new(wlr);
+                            spawn_pointer_extents_refresher(
+                                wlr.clone(),
+                                focus_tracker.clone(),
+                                logger.clone(),
+                            );
+                            wlr
+                        }
+                        Err(e) => {
+                            logger.warn(format!(
+                                "zwlr_virtual_pointer_v1 unavailable ({}). Falling back to \
+                                 uinput pointer; click_at may not address the correct monitor \
+                                 on multi-output layouts.",
+                                e
+                            ));
+                            Arc::new(
+                                wayclick_core::pointer_backend::InputBackendPointerAdapter::new(
+                                    uinput_arc.clone(),
+                                ),
+                            )
+                        }
+                    };
+
+                Arc::new(wayclick_core::pointer_backend::RoutedBackend::new(
+                    uinput_arc, pointer,
+                ))
             }
             Err(e) => {
                 logger.warn(format!(
@@ -159,6 +209,10 @@ fn main() {
         event_bus.clone(),
         cli.config.clone(),
     )));
+
+    // Wire the focus tracker into the engine so monitor-aware ClickAt and
+    // MouseMoveAbsolute can resolve their `monitor` field to global coords.
+    with_engine_events(&engine, |eng| eng.set_focus_tracker(focus_tracker.clone()));
 
     // Enable if --enable flag set
     if cli.enable {
@@ -354,4 +408,64 @@ fn check_permissions(config_path: &str) {
     }
 
     println!("────────────────────────────────");
+}
+
+/// Compute the smallest bounding box `(width, height)` that covers all
+/// monitor logical rectangles (`x + logical_width`, `y + logical_height`).
+///
+/// This is what `zwlr_virtual_pointer_v1::motion_absolute` needs as its
+/// `x_extent`/`y_extent`: the compositor maps `(x/x_extent, y/y_extent)`
+/// across its desktop layout, so the extents must equal the layout span.
+/// Falls back to a sane default (1920×1080) when the focus tracker can't
+/// report monitor info — better than `0×0` which would divide-by-zero on
+/// the compositor side.
+fn compute_extents_from_focus_tracker(
+    ft: &FocusTracker,
+) -> wayclick_core::wlr_pointer::DesktopExtents {
+    let Some(mons) = ft.monitors() else {
+        return wayclick_core::wlr_pointer::DesktopExtents::new(1920, 1080);
+    };
+    let mut max_x = 0i32;
+    let mut max_y = 0i32;
+    for m in &mons {
+        max_x = max_x.max(m.x.saturating_add(m.logical_width));
+        max_y = max_y.max(m.y.saturating_add(m.logical_height));
+    }
+    if max_x <= 0 || max_y <= 0 {
+        return wayclick_core::wlr_pointer::DesktopExtents::new(1920, 1080);
+    }
+    wayclick_core::wlr_pointer::DesktopExtents::new(max_x as u32, max_y as u32)
+}
+
+/// Spawn a background thread that periodically re-queries the focus tracker
+/// for monitor layout and pushes the union rect into the Wayland pointer.
+/// This keeps `motion_absolute` scaling accurate after hot-plug, resolution
+/// changes, or display rotations without requiring a daemon restart.
+///
+/// Poll-based (every 2s) rather than event-driven because the focus tracker
+/// doesn't yet expose layout-change subscriptions; the cost of one Hyprland
+/// socket round-trip every 2s is negligible.
+fn spawn_pointer_extents_refresher(
+    pointer: Arc<wayclick_core::wlr_pointer::WlrVirtualPointer>,
+    focus_tracker: Arc<FocusTracker>,
+    logger: Arc<Logger>,
+) {
+    thread::Builder::new()
+        .name("wayclickd-pointer-extents".into())
+        .spawn(move || {
+            let mut last = compute_extents_from_focus_tracker(&focus_tracker);
+            loop {
+                thread::sleep(Duration::from_secs(2));
+                let current = compute_extents_from_focus_tracker(&focus_tracker);
+                if current != last {
+                    logger.info(format!(
+                        "Pointer extents updated: {}×{} -> {}×{} (display layout change)",
+                        last.width, last.height, current.width, current.height
+                    ));
+                    pointer.set_extents(current);
+                    last = current;
+                }
+            }
+        })
+        .expect("failed to spawn pointer-extents refresher thread");
 }

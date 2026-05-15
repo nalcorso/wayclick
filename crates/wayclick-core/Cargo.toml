@@ -15,6 +15,8 @@ nix = { workspace = true }
 rand = { workspace = true }
 libc = { workspace = true }
 wayclick-ipc-client = { workspace = true }
+wayland-client = { workspace = true }
+wayland-protocols-wlr = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
