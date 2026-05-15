@@ -219,6 +219,11 @@ pub enum ActionConfig {
     MouseMoveAbsolute {
         x: i32,
         y: i32,
+        /// Optional monitor name (e.g. `"DP-2"`) to interpret `(x, y)` as
+        /// monitor-local logical pixels. If `None`, `(x, y)` are global
+        /// compositor pixels.
+        #[serde(default)]
+        monitor: Option<String>,
     },
     ClickAt {
         x: i32,
@@ -228,6 +233,11 @@ pub enum ActionConfig {
         hold_ms: u32,
         #[serde(default)]
         settle_ms: u32,
+        /// Optional monitor name (e.g. `"DP-2"`) to interpret `(x, y)` as
+        /// monitor-local logical pixels. If `None`, `(x, y)` are global
+        /// compositor pixels.
+        #[serde(default)]
+        monitor: Option<String>,
     },
     Drag {
         from_x: i32,

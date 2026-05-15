@@ -559,10 +559,14 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             let y: i32 = table
                 .get::<i32>("y")
                 .map_err(|_| LuaError::RuntimeError("mouse_move_abs requires 'y' field".into()))?;
+            let monitor: Option<String> = table.get("monitor").ok();
             let action = lua.create_table()?;
             action.set("_type", "mouse_move_abs")?;
             action.set("_x", x)?;
             action.set("_y", y)?;
+            if let Some(m) = monitor {
+                action.set("_monitor", m)?;
+            }
             Ok(action)
         })
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
@@ -582,6 +586,7 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             let button: String = table.get("button").unwrap_or_else(|_| "left".into());
             let hold_ms: u32 = table.get("hold_ms").unwrap_or(0);
             let settle_ms: u32 = table.get("settle_ms").unwrap_or(5);
+            let monitor: Option<String> = table.get("monitor").ok();
             let action = lua.create_table()?;
             action.set("_type", "click_at")?;
             action.set("_x", x)?;
@@ -589,6 +594,9 @@ fn register_wayclick_api(lua: &Lua, _logger: &Arc<Logger>) -> Result<(), ConfigE
             action.set("_button", button)?;
             action.set("_hold_ms", hold_ms)?;
             action.set("_settle_ms", settle_ms)?;
+            if let Some(m) = monitor {
+                action.set("_monitor", m)?;
+            }
             Ok(action)
         })
         .map_err(|e| ConfigError::Lua(e.to_string()))?;
@@ -1245,7 +1253,9 @@ fn parse_action_table(table: &LuaTable, depth: usize) -> Result<ActionConfig, Lu
         "mouse_move_abs" => {
             let x: i32 = table.get("_x")?;
             let y: i32 = table.get("_y")?;
-            Ok(ActionConfig::MouseMoveAbsolute { x, y })
+            let monitor: Option<String> = table.get("_monitor").ok();
+            let monitor = monitor.filter(|s| !s.is_empty());
+            Ok(ActionConfig::MouseMoveAbsolute { x, y, monitor })
         }
         "click_at" => {
             let x: i32 = table.get("_x")?;
@@ -1255,12 +1265,15 @@ fn parse_action_table(table: &LuaTable, depth: usize) -> Result<ActionConfig, Lu
                 .map_err(|e| LuaError::RuntimeError(e.to_string()))?;
             let hold_ms: u32 = table.get("_hold_ms").unwrap_or(0);
             let settle_ms: u32 = table.get("_settle_ms").unwrap_or(5);
+            let monitor: Option<String> = table.get("_monitor").ok();
+            let monitor = monitor.filter(|s| !s.is_empty());
             Ok(ActionConfig::ClickAt {
                 x,
                 y,
                 button,
                 hold_ms,
                 settle_ms,
+                monitor,
             })
         }
         "drag" => {
@@ -2104,11 +2117,87 @@ mod tests {
         );
         let config = load_config(&path, &test_logger()).unwrap();
         match &config.triggers[0].action {
-            ActionConfig::MouseMoveAbsolute { x, y } => {
+            ActionConfig::MouseMoveAbsolute { x, y, monitor } => {
                 assert_eq!(*x, 100);
                 assert_eq!(*y, 200);
+                assert!(monitor.is_none());
             }
             _ => panic!("Expected MouseMoveAbsolute"),
+        }
+    }
+
+    #[test]
+    fn test_mouse_move_abs_with_monitor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.mouse_move_abs({ x = 100, y = 200, monitor = "DP-2" }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::MouseMoveAbsolute { x, y, monitor } => {
+                assert_eq!(*x, 100);
+                assert_eq!(*y, 200);
+                assert_eq!(monitor.as_deref(), Some("DP-2"));
+            }
+            _ => panic!("Expected MouseMoveAbsolute"),
+        }
+    }
+
+    #[test]
+    fn test_click_at_with_monitor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.click_at({
+                    x = 50, y = 60, button = "left", monitor = "HDMI-A-1",
+                }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::ClickAt { x, y, monitor, .. } => {
+                assert_eq!(*x, 50);
+                assert_eq!(*y, 60);
+                assert_eq!(monitor.as_deref(), Some("HDMI-A-1"));
+            }
+            _ => panic!("Expected ClickAt"),
+        }
+    }
+
+    #[test]
+    fn test_click_at_empty_monitor_string_is_none() {
+        // Empty string should normalize to None so users don't accidentally
+        // pass an unresolvable monitor name.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_temp_config(
+            dir.path(),
+            "init.lua",
+            r#"
+            wayclick.register_trigger({
+                id = "test",
+                mode = "oneshot",
+                action = wayclick.click_at({ x = 1, y = 2, monitor = "" }),
+            })
+        "#,
+        );
+        let config = load_config(&path, &test_logger()).unwrap();
+        match &config.triggers[0].action {
+            ActionConfig::ClickAt { monitor, .. } => assert!(monitor.is_none()),
+            _ => panic!("Expected ClickAt"),
         }
     }
 
@@ -2134,6 +2223,7 @@ mod tests {
                 button,
                 hold_ms,
                 settle_ms,
+                ..
             } => {
                 assert_eq!(*x, 500);
                 assert_eq!(*y, 300);
@@ -2490,7 +2580,12 @@ mod tests {
     #[test]
     fn test_action_type_names() {
         assert_eq!(
-            ActionConfig::MouseMoveAbsolute { x: 0, y: 0 }.type_name(),
+            ActionConfig::MouseMoveAbsolute {
+                x: 0,
+                y: 0,
+                monitor: None
+            }
+            .type_name(),
             "mouse_move_abs"
         );
         assert_eq!(
@@ -2500,6 +2595,7 @@ mod tests {
                 button: MouseButton::Left,
                 hold_ms: 0,
                 settle_ms: 5,
+                monitor: None,
             }
             .type_name(),
             "click_at"
@@ -2534,6 +2630,7 @@ mod tests {
             button: MouseButton::Left,
             hold_ms: 0,
             settle_ms: 5,
+            monitor: None,
         }
         .is_oneshot_only());
         assert!(ActionConfig::Drag {
@@ -2545,7 +2642,12 @@ mod tests {
             duration_ms: 100
         }
         .is_oneshot_only());
-        assert!(ActionConfig::MouseMoveAbsolute { x: 0, y: 0 }.is_oneshot_only());
+        assert!(ActionConfig::MouseMoveAbsolute {
+            x: 0,
+            y: 0,
+            monitor: None
+        }
+        .is_oneshot_only());
         assert!(!ActionConfig::NoOp.is_oneshot_only());
         assert!(!ActionConfig::AutoClick {
             button: MouseButton::Left,

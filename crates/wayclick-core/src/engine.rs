@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 use crate::config::*;
 use crate::event_bus::{Event, EventBus};
+use crate::focus_tracker::FocusTracker;
 use crate::input_backend::{BackendError, InputBackend};
 use crate::logger::Logger;
 use rand::Rng;
@@ -94,6 +95,11 @@ pub struct Engine {
     backend: Arc<dyn InputBackend>,
     logger: Arc<Logger>,
     event_bus: Arc<EventBus>,
+    /// Optional focus tracker used to resolve `monitor`-aware coordinates
+    /// (see `MonitorInfo`). When unset (e.g. in tests, or on compositors
+    /// without monitor reporting), actions specifying a `monitor` field
+    /// log a warning and fall back to treating their coordinates as global.
+    focus_tracker: Option<Arc<FocusTracker>>,
     enabled: bool,
     start_time: Instant,
     config_path: String,
@@ -126,6 +132,7 @@ impl Engine {
             backend,
             logger,
             event_bus,
+            focus_tracker: None,
             enabled: false,
             start_time: Instant::now(),
             config_path,
@@ -134,6 +141,16 @@ impl Engine {
             trigger_enabled: HashMap::new(),
             pending_events: Vec::new(),
         }
+    }
+
+    /// Provide a focus tracker for monitor-aware coordinate resolution.
+    ///
+    /// When set, `ClickAt` and `MouseMoveAbsolute` actions with a `monitor`
+    /// field interpret their `(x, y)` as monitor-local logical pixels and
+    /// translate to global compositor pixels before dispatching to the
+    /// pointer backend.
+    pub fn set_focus_tracker(&mut self, ft: Arc<FocusTracker>) {
+        self.focus_tracker = Some(ft);
     }
 
     pub fn apply_config(&mut self, config: Config) {
@@ -306,7 +323,12 @@ impl Engine {
             return Ok(());
         }
 
-        execute_action_sync(&trigger.action, &self.backend, &self.logger)?;
+        execute_action_sync(
+            &trigger.action,
+            &self.backend,
+            &self.logger,
+            self.focus_tracker.as_ref(),
+        )?;
         self.logger
             .info(format!("{}: oneshot complete", trigger.id));
         self.pending_events
@@ -319,12 +341,15 @@ impl Engine {
         let action = trigger.action.clone();
         let backend = self.backend.clone();
         let logger = self.logger.clone();
+        let focus_tracker = self.focus_tracker.clone();
         let trigger_id = trigger.id.clone();
 
         self.logger.info(format!("{}: started", trigger.id));
 
         let handle = thread::spawn(move || {
-            if let Err(e) = execute_action_loop(&action, &backend, &logger, &stop_rx) {
+            if let Err(e) =
+                execute_action_loop(&action, &backend, &logger, &stop_rx, focus_tracker.as_ref())
+            {
                 logger.error(format!("{}: worker error: {}", trigger_id, e));
             }
         });
@@ -670,6 +695,44 @@ fn execute_drag(
     Ok(())
 }
 
+/// Resolve a `(x, y, monitor)` tuple to global compositor pixels.
+///
+/// When `monitor` is `Some(name)`:
+/// - With a focus tracker that supports monitor reporting, look up the
+///   monitor and translate `(x, y)` (monitor-local) by adding the monitor
+///   origin.
+/// - Otherwise log a warning and treat `(x, y)` as global coords (this is
+///   the safest behaviour: scripts that "want" a monitor still execute on
+///   compositors that can't introspect the layout).
+fn resolve_global_coords(
+    focus_tracker: Option<&Arc<FocusTracker>>,
+    logger: &Logger,
+    x: i32,
+    y: i32,
+    monitor: &Option<String>,
+) -> (i32, i32) {
+    let Some(name) = monitor.as_deref() else {
+        return (x, y);
+    };
+    if let Some(ft) = focus_tracker {
+        if let Some(m) = ft.monitor_info(name) {
+            return (m.x.saturating_add(x), m.y.saturating_add(y));
+        }
+        logger.warn(format!(
+            "Action references monitor '{}', but no matching monitor was found. \
+             Using the coordinates as global compositor pixels (likely wrong).",
+            name
+        ));
+    } else {
+        logger.warn(format!(
+            "Action references monitor '{}', but the focus tracker has no monitor \
+             support on this compositor. Using the coordinates as global pixels.",
+            name
+        ));
+    }
+    (x, y)
+}
+
 /// Execute a ClickAt action: move to `(x, y)`, optionally settle, then click.
 fn execute_click_at(
     backend: &Arc<dyn InputBackend>,
@@ -692,6 +755,7 @@ fn execute_action_loop(
     backend: &Arc<dyn InputBackend>,
     logger: &Arc<Logger>,
     stop_rx: &mpsc::Receiver<()>,
+    focus_tracker: Option<&Arc<FocusTracker>>,
 ) -> Result<(), BackendError> {
     match action {
         ActionConfig::AutoClick {
@@ -809,11 +873,18 @@ fn execute_action_loop(
                 let sub_action = sub_action.clone();
                 let backend = backend.clone();
                 let logger = logger.clone();
+                let ft = focus_tracker.cloned();
                 let (sub_stop_tx, sub_stop_rx) = mpsc::channel();
                 handles.push(sub_stop_tx);
 
                 thread::spawn(move || {
-                    let _ = execute_action_loop(&sub_action, &backend, &logger, &sub_stop_rx);
+                    let _ = execute_action_loop(
+                        &sub_action,
+                        &backend,
+                        &logger,
+                        &sub_stop_rx,
+                        ft.as_ref(),
+                    );
                 });
             }
 
@@ -828,21 +899,25 @@ fn execute_action_loop(
         ActionConfig::Composite {
             mode: CompositeMode::Sequence,
             actions,
-        } => {
+        } => loop {
             for sub_action in actions {
                 if stop_rx.try_recv().is_ok() {
-                    break;
+                    return Ok(());
                 }
-                execute_action_sync(sub_action, backend, logger)?;
+                execute_action_sync(sub_action, backend, logger, focus_tracker)?;
             }
-        }
+            if stop_rx.try_recv().is_ok() {
+                return Ok(());
+            }
+        },
         ActionConfig::Delay { duration_ms } => {
             interruptible_sleep(*duration_ms, stop_rx);
         }
         // These actions are oneshot-only — they don't make sense in a loop context.
         // Execute once and stop.
-        ActionConfig::MouseMoveAbsolute { x, y } => {
-            backend.move_absolute(*x, *y)?;
+        ActionConfig::MouseMoveAbsolute { x, y, monitor } => {
+            let (gx, gy) = resolve_global_coords(focus_tracker, logger, *x, *y, monitor);
+            backend.move_absolute(gx, gy)?;
         }
         ActionConfig::ClickAt {
             x,
@@ -850,8 +925,10 @@ fn execute_action_loop(
             button,
             hold_ms,
             settle_ms,
+            monitor,
         } => {
-            execute_click_at(backend, *x, *y, *button, *hold_ms, *settle_ms)?;
+            let (gx, gy) = resolve_global_coords(focus_tracker, logger, *x, *y, monitor);
+            execute_click_at(backend, gx, gy, *button, *hold_ms, *settle_ms)?;
         }
         ActionConfig::Drag {
             from_x,
@@ -892,6 +969,7 @@ fn execute_action_sync(
     action: &ActionConfig,
     backend: &Arc<dyn InputBackend>,
     logger: &Arc<Logger>,
+    focus_tracker: Option<&Arc<FocusTracker>>,
 ) -> Result<(), BackendError> {
     match action {
         ActionConfig::AutoClick {
@@ -961,7 +1039,7 @@ fn execute_action_sync(
             actions,
         } => {
             for a in actions {
-                execute_action_sync(a, backend, logger)?;
+                execute_action_sync(a, backend, logger, focus_tracker)?;
             }
         }
         ActionConfig::Composite {
@@ -973,8 +1051,9 @@ fn execute_action_sync(
                 let a = a.clone();
                 let backend = backend.clone();
                 let logger = logger.clone();
+                let ft = focus_tracker.cloned();
                 handles.push(thread::spawn(move || {
-                    execute_action_sync(&a, &backend, &logger)
+                    execute_action_sync(&a, &backend, &logger, ft.as_ref())
                 }));
             }
             for h in handles {
@@ -984,8 +1063,9 @@ fn execute_action_sync(
         ActionConfig::Delay { duration_ms } => {
             thread::sleep(Duration::from_millis(*duration_ms as u64));
         }
-        ActionConfig::MouseMoveAbsolute { x, y } => {
-            backend.move_absolute(*x, *y)?;
+        ActionConfig::MouseMoveAbsolute { x, y, monitor } => {
+            let (gx, gy) = resolve_global_coords(focus_tracker, logger, *x, *y, monitor);
+            backend.move_absolute(gx, gy)?;
         }
         ActionConfig::ClickAt {
             x,
@@ -993,8 +1073,10 @@ fn execute_action_sync(
             button,
             hold_ms,
             settle_ms,
+            monitor,
         } => {
-            execute_click_at(backend, *x, *y, *button, *hold_ms, *settle_ms)?;
+            let (gx, gy) = resolve_global_coords(focus_tracker, logger, *x, *y, monitor);
+            execute_click_at(backend, gx, gy, *button, *hold_ms, *settle_ms)?;
         }
         ActionConfig::Drag {
             from_x,
@@ -1125,7 +1207,7 @@ pub mod bench {
         backend: &Arc<dyn InputBackend>,
         logger: &Arc<Logger>,
     ) -> Result<(), BackendError> {
-        execute_action_sync(action, backend, logger)
+        execute_action_sync(action, backend, logger, None)
     }
 
     /// Benchmark wrapper for `do_click`.
@@ -1446,7 +1528,11 @@ mod tests {
             name: "Move".into(),
             description: String::new(),
             mode: TriggerMode::OneShot,
-            action: ActionConfig::MouseMoveAbsolute { x: 1000, y: 2000 },
+            action: ActionConfig::MouseMoveAbsolute {
+                x: 1000,
+                y: 2000,
+                monitor: None,
+            },
             cooldown_ms: None,
         };
         let (mut engine, calls) = test_engine(vec![trigger]);
@@ -1470,6 +1556,7 @@ mod tests {
                 button: MouseButton::Left,
                 hold_ms: 0,
                 settle_ms: 5,
+                monitor: None,
             },
             cooldown_ms: None,
         };
@@ -1695,6 +1782,121 @@ mod tests {
                 BackendCall::MouseRelease(MouseButton::Left),
             ],
             "early-stop drag must press, then release without interpolating"
+        );
+    }
+
+    fn sequence_trigger(id: &str, mode: TriggerMode) -> TriggerBinding {
+        TriggerBinding {
+            id: id.to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            mode,
+            action: ActionConfig::Composite {
+                mode: CompositeMode::Sequence,
+                actions: vec![
+                    ActionConfig::MouseMoveAbsolute {
+                        x: 1,
+                        y: 1,
+                        monitor: None,
+                    },
+                    ActionConfig::MouseMoveAbsolute {
+                        x: 2,
+                        y: 2,
+                        monitor: None,
+                    },
+                    ActionConfig::Delay { duration_ms: 5 },
+                ],
+            },
+            cooldown_ms: None,
+        }
+    }
+
+    fn count_moves(calls: &Arc<Mutex<Vec<BackendCall>>>) -> usize {
+        calls
+            .lock_or_recover()
+            .iter()
+            .filter(|c| matches!(c, BackendCall::MoveAbsolute(_, _)))
+            .count()
+    }
+
+    #[test]
+    fn test_toggle_sequence_loops_until_stopped() {
+        let (mut engine, calls) = test_engine(vec![sequence_trigger("seq", TriggerMode::Toggle)]);
+        engine.set_enabled(true);
+
+        // Press → starts the loop
+        engine.trigger_event("seq", true).unwrap();
+
+        // Allow several iterations (each iteration = 2 moves + ~5ms delay)
+        thread::sleep(Duration::from_millis(80));
+
+        let count_running = count_moves(&calls);
+        assert!(
+            count_running >= 4,
+            "Expected sequence to loop multiple times under toggle; got {count_running} moves",
+        );
+
+        // Press again → stops the loop
+        engine.trigger_event("seq", true).unwrap();
+
+        // Let any in-flight iteration drain
+        thread::sleep(Duration::from_millis(30));
+        let count_stopped = count_moves(&calls);
+
+        thread::sleep(Duration::from_millis(40));
+        let count_later = count_moves(&calls);
+        assert_eq!(
+            count_stopped, count_later,
+            "Toggle should stop the loop; saw {count_stopped} then {count_later} moves",
+        );
+    }
+
+    #[test]
+    fn test_oneshot_sequence_runs_exactly_once() {
+        let (mut engine, calls) = test_engine(vec![sequence_trigger("seq", TriggerMode::OneShot)]);
+        engine.set_enabled(true);
+
+        engine.trigger_event("seq", true).unwrap();
+
+        // OneShot is synchronous in the test harness — wait briefly anyway.
+        thread::sleep(Duration::from_millis(30));
+
+        let moves = count_moves(&calls);
+        assert_eq!(
+            moves, 2,
+            "OneShot+Sequence must execute the sub-actions exactly once",
+        );
+
+        // Wait further to confirm no extra iteration sneaks in.
+        thread::sleep(Duration::from_millis(40));
+        assert_eq!(count_moves(&calls), 2);
+    }
+
+    #[test]
+    fn test_hold_sequence_loops_while_held() {
+        let (mut engine, calls) = test_engine(vec![sequence_trigger("seq", TriggerMode::Hold)]);
+        engine.set_enabled(true);
+
+        // Press and hold
+        engine.trigger_event("seq", true).unwrap();
+        thread::sleep(Duration::from_millis(80));
+
+        let count_held = count_moves(&calls);
+        assert!(
+            count_held >= 4,
+            "Hold+Sequence should loop while held; got {count_held} moves",
+        );
+
+        // Release → stops the loop
+        engine.trigger_event("seq", false).unwrap();
+        thread::sleep(Duration::from_millis(30));
+        let count_released = count_moves(&calls);
+
+        thread::sleep(Duration::from_millis(40));
+        let count_later = count_moves(&calls);
+        assert_eq!(
+            count_released, count_later,
+            "Release must stop hold loop; saw {count_released} then {count_later} moves",
         );
     }
 }

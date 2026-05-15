@@ -107,7 +107,11 @@ fn bench_execute_action_sync(c: &mut Criterion) {
 
     // Move absolute
     group.bench_function("move_absolute", |b| {
-        let action = ActionConfig::MouseMoveAbsolute { x: 500, y: 300 };
+        let action = ActionConfig::MouseMoveAbsolute {
+            x: 500,
+            y: 300,
+            monitor: None,
+        };
         b.iter(|| bench::bench_execute_action_sync(black_box(&action), &backend, &logger))
     });
 
@@ -119,6 +123,7 @@ fn bench_execute_action_sync(c: &mut Criterion) {
             button: MouseButton::Left,
             hold_ms: 0,
             settle_ms: 0,
+            monitor: None,
         };
         b.iter(|| bench::bench_execute_action_sync(black_box(&action), &backend, &logger))
     });
@@ -131,6 +136,7 @@ fn bench_execute_action_sync(c: &mut Criterion) {
             button: MouseButton::Left,
             hold_ms: 0,
             settle_ms: 5,
+            monitor: None,
         };
         b.iter(|| bench::bench_execute_action_sync(black_box(&action), &backend, &logger))
     });
