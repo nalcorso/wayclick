@@ -21,7 +21,7 @@ use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, RecvError, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, RecvError, RecvTimeoutError, Sender, TryRecvError};
 use std::time::Duration;
 
 const MAX_FRAME: usize = crate::frame::MAX_FRAME_SIZE as usize;
@@ -122,6 +122,17 @@ impl AsyncClient {
             Ok(msg) => Ok(Some(msg)),
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => Err(IpcError::ConnectionClosed),
+        }
+    }
+
+    /// Receive the next event, blocking up to `timeout`. Returns `Ok(None)`
+    /// if the timeout elapsed without an event. This avoids the busy-poll
+    /// + `try_recv` + sleep pattern in consumer code (e.g. the recorder).
+    pub fn recv_timeout(&self, timeout: Duration) -> Result<Option<IpcMessage>, IpcError> {
+        match self.msg_rx.recv_timeout(timeout) {
+            Ok(msg) => Ok(Some(msg)),
+            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Disconnected) => Err(IpcError::ConnectionClosed),
         }
     }
 
